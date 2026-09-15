@@ -1,5 +1,5 @@
 /**
- * Deploys the SoroCron registry and the example contracts to testnet.
+ * Deploys the SoroCron contracts and examples to testnet.
  *
  *   cargo build --release --target wasm32v1-none   (from the repo root)
  *   npm run deploy:testnet                          (from keeper-bot/)
@@ -28,8 +28,10 @@ import {
   RPC_URL,
   WASM_DIR,
   XLM,
+  clientFor,
   ensureFunded,
   server,
+  unwrap,
   type Deployment,
 } from "./config.js";
 
@@ -106,6 +108,8 @@ async function main() {
   console.log(`Deploying SoroCron to ${NETWORK} as ${admin}`);
   console.log("Uploading WASM...");
   const registryHash = await uploadWasm(keypair, "sorocron_registry.wasm");
+  const executorHash = await uploadWasm(keypair, "sorocron_executor.wasm");
+  const guardianHash = await uploadWasm(keypair, "sorocron_ttl_guardian.wasm");
   const counterHash = await uploadWasm(keypair, "sorocron_example_counter.wasm");
   const resolverHash = await uploadWasm(keypair, "sorocron_example_flag_resolver.wasm");
 
@@ -118,6 +122,15 @@ async function main() {
     unbonding_period: UNBONDING_PERIOD_SECONDS,
   });
   console.log(`  registry       ${registry}`);
+
+  const executor = await deploy(keypair, executorHash, { registry });
+  console.log(`  executor       ${executor}`);
+  const registryClient = await clientFor(registry, keypair);
+  unwrap((await (await registryClient.set_executor({ executor })).signAndSend()).result);
+  console.log("  executor connected to registry");
+
+  const ttlGuardian = await deploy(keypair, guardianHash, null);
+  console.log(`  ttl-guardian   ${ttlGuardian}`);
   const counter = await deploy(keypair, counterHash, null);
   console.log(`  counter        ${counter}`);
   const flagResolver = await deploy(keypair, resolverHash, { admin });
@@ -126,6 +139,8 @@ async function main() {
   const deployment: Deployment = {
     network: NETWORK,
     registry,
+    executor,
+    ttlGuardian,
     counter,
     flagResolver,
     feeToken,
