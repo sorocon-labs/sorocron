@@ -72,6 +72,12 @@ pub struct KeeperWithdrawn {
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutorSet {
+    pub executor: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PausedSet {
     pub paused: bool,
 }

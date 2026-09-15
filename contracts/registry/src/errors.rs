@@ -21,4 +21,6 @@ pub enum Error {
     KeeperUnbonding = 13,
     UnbondingNotStarted = 14,
     UnbondingNotFinished = 15,
+    ExecutorNotSet = 16,
+    ExecutorAlreadySet = 17,
 }

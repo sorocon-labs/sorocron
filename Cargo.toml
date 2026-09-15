@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "contracts/registry",
+    "contracts/executor",
     "contracts/examples/counter",
     "contracts/examples/flag-resolver",
 ]
