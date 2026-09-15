@@ -91,3 +91,4 @@ The registry calls it with `try_invoke_contract`, so a resolver that panics or d
 | 15 | `UnbondingNotFinished` | Unbonding period not over |
 | 16 | `ExecutorNotSet` | Admin hasn't connected the executor yet |
 | 17 | `ExecutorAlreadySet` | The executor can only be set once |
+| 18 | `NoPendingAdmin` | `accept_admin` called with no proposal outstanding |

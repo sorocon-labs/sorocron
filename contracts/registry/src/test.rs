@@ -624,3 +624,96 @@ fn targets_cannot_use_registry_authority() {
     assert_eq!(other.balance(&s.cron.address), 500);
     assert_eq!(other.balance(&attacker), 0);
 }
+
+// ---------------------------------------------------------------------------
+// Admin handover
+// ---------------------------------------------------------------------------
+
+#[test]
+fn two_step_admin_transfer() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+    assert_eq!(s.cron.pending_admin(), None);
+
+    s.cron.propose_admin(&new_admin);
+    assert_eq!(s.cron.pending_admin(), Some(new_admin.clone()));
+    assert_eq!(s.cron.config().admin, s.admin, "unchanged until accepted");
+
+    s.cron.accept_admin();
+    assert_eq!(s.cron.config().admin, new_admin);
+    assert_eq!(s.cron.pending_admin(), None);
+}
+
+#[test]
+fn accept_admin_without_proposal_fails() {
+    let s = setup();
+    assert_eq!(s.cron.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+#[test]
+fn new_admin_proposal_replaces_pending_one() {
+    let s = setup();
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+
+    s.cron.propose_admin(&first);
+    s.cron.propose_admin(&second);
+    assert_eq!(s.cron.pending_admin(), Some(second.clone()));
+
+    s.cron.accept_admin();
+    assert_eq!(s.cron.config().admin, second);
+}
+
+#[test]
+fn only_admin_proposes_and_only_proposed_accepts() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+    let stranger = Address::generate(&s.env);
+    let propose_args: Vec<Val> = vec![&s.env, new_admin.into_val(&s.env)];
+    let no_args: Vec<Val> = Vec::new(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "propose_admin",
+            args: propose_args.clone(),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_propose_admin(&new_admin).is_err());
+
+    s.env.mock_auths(&[MockAuth {
+        address: &s.admin,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "propose_admin",
+            args: propose_args,
+            sub_invokes: &[],
+        },
+    }]);
+    s.cron.propose_admin(&new_admin);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "accept_admin",
+            args: no_args.clone(),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_accept_admin().is_err());
+
+    s.env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "accept_admin",
+            args: no_args,
+            sub_invokes: &[],
+        },
+    }]);
+    s.cron.accept_admin();
+    assert_eq!(s.cron.config().admin, new_admin);
+}

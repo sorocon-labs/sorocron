@@ -73,4 +73,5 @@ pub enum DataKey {
     NextJobId,
     Job(u64),
     Keeper(Address),
+    PendingAdmin,
 }
