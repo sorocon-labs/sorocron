@@ -21,6 +21,8 @@ export const server = new rpc.Server(RPC_URL);
 export interface Deployment {
   network: string;
   registry: string;
+  executor: string;
+  ttlGuardian: string;
   counter: string;
   flagResolver: string;
   feeToken: string;
