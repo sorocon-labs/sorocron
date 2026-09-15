@@ -1,4 +1,5 @@
 use crate::{Error, JobParams, SoroCron, SoroCronClient};
+use soroban_sdk::testutils::Deployer as _;
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
     testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
@@ -6,6 +7,7 @@ use soroban_sdk::{
     vec, Address, Env, IntoVal, Symbol, Val, Vec,
 };
 use sorocron_executor::Executor;
+use sorocron_ttl_guardian::TtlGuardian;
 
 const MIN_STAKE: i128 = 1_000;
 const UNBONDING: u64 = 3_600;
@@ -716,6 +718,52 @@ fn only_admin_proposes_and_only_proposed_accepts() {
     }]);
     s.cron.accept_admin();
     assert_eq!(s.cron.config().admin, new_admin);
+}
+
+// ---------------------------------------------------------------------------
+// TTL Guardian integration
+// ---------------------------------------------------------------------------
+
+#[test]
+fn guardian_job_keeps_target_contract_from_being_archived() {
+    let s = setup();
+    let guardian = s.env.register(TtlGuardian, ());
+    let original_ttl = s
+        .env
+        .deployer()
+        .get_contract_instance_ttl(&s.target.address);
+    let extend_to: u32 = 50_000;
+
+    let mut p = params(&s);
+    p.target = guardian;
+    p.function = Symbol::new(&s.env, "extend");
+    p.args = vec![
+        &s.env,
+        s.target.address.into_val(&s.env),
+        extend_to.into_val(&s.env),
+        extend_to.into_val(&s.env),
+    ];
+    p.interval = 86_400;
+    let id = s.cron.create_job(&s.owner, &p, &100);
+
+    // One ledger before the target would expire, a keeper runs the job.
+    s.env.ledger().with_mut(|l| {
+        l.sequence_number += original_ttl - 1;
+        l.timestamp += 86_400;
+    });
+    s.cron.execute(&s.keeper, &id);
+    assert_eq!(
+        s.env
+            .deployer()
+            .get_contract_instance_ttl(&s.target.address),
+        extend_to
+    );
+
+    // Long past the original expiry, the target still works.
+    s.env
+        .ledger()
+        .with_mut(|l| l.sequence_number += original_ttl * 2);
+    assert_eq!(s.target.count(), 0);
 }
 
 // ---------------------------------------------------------------------------

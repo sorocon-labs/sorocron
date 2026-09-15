@@ -70,6 +70,25 @@ fn should_run(env: Env, job_id: u64) -> bool;
 
 The registry calls it with `try_invoke_contract`, so a resolver that panics or doesn't exist simply blocks execution (`ResolverRejected`) instead of breaking `is_due` for keepers.
 
+## TTL Guardian
+
+Stellar archives contract entries whose TTL runs out; an archived contract stops working until someone restores it. Extending TTL is permissionless, but somebody has to remember to do it, and forgetting breaks production.
+
+`contracts/ttl-guardian` turns this into an ordinary SoroCron job:
+
+```text
+target:   <ttl-guardian>
+function: extend
+args:     [contract_to_protect, threshold_ledgers, extend_to_ledgers]
+interval: 86400   (check daily)
+```
+
+Each run extends the protected contract's **instance and code** TTL to `extend_to` whenever it has dropped below `threshold` (and does nothing otherwise). `extend_to` is capped at the network maximum. The job is paid for like any other, so the protocol never has to run its own bot.
+
+Limitation: a contract can only extend another contract's instance and code, not its persistent storage entries. Contracts that need persistent data kept alive should expose a permissionless `extend_ttl` function that bumps their own entries, and schedule that directly.
+
+The test `guardian_job_keeps_target_contract_from_being_archived` runs this end to end through the registry, executor and a keeper.
+
 ## Error codes
 
 | Code | Name | Meaning |

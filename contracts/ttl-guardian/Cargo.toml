@@ -1,6 +1,6 @@
 [package]
-name = "sorocron-registry"
-description = "SoroCron registry: scheduled and conditional job execution by staked keepers"
+name = "sorocron-ttl-guardian"
+description = "SoroCron TTL Guardian: keeps contracts from being archived via scheduled TTL extension"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,5 +16,3 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-sorocron-executor = { path = "../executor" }
-sorocron-ttl-guardian = { path = "../ttl-guardian" }
