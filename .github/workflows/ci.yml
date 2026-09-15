@@ -20,8 +20,18 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - run: cargo build --release --target wasm32v1-none
-      - name: Report WASM sizes
-        run: ls -l target/wasm32v1-none/release/*.wasm
+      - name: Enforce WASM size budget
+        # Soroban rejects contracts over 64 KB; fail early with headroom.
+        run: |
+          budget=60000
+          for f in target/wasm32v1-none/release/*.wasm; do
+            size=$(stat -c%s "$f")
+            echo "$(basename "$f"): $size bytes"
+            if [ "$size" -gt "$budget" ]; then
+              echo "::error file=$f::$(basename "$f") is $size bytes, over the $budget byte budget"
+              exit 1
+            fi
+          done
 
   keeper-bot:
     name: Keeper bot (typecheck)
