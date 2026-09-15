@@ -1,10 +1,11 @@
 use crate::{Error, JobParams, SoroCron, SoroCronClient};
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
     vec, Address, Env, IntoVal, Symbol, Val, Vec,
 };
+use sorocron_executor::Executor;
 
 const MIN_STAKE: i128 = 1_000;
 const UNBONDING: u64 = 3_600;
@@ -72,6 +73,13 @@ struct Setup {
 }
 
 fn setup() -> Setup {
+    let s = setup_without_executor();
+    let executor_id = s.env.register(Executor, (s.cron.address.clone(),));
+    s.cron.set_executor(&executor_id);
+    s
+}
+
+fn setup_without_executor() -> Setup {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(START);
@@ -214,6 +222,13 @@ fn create_job_rejects_custodied_token_and_self_as_target() {
 
     let mut p = params(&s);
     p.target = s.cron.address.clone();
+    assert_eq!(
+        s.cron.try_create_job(&s.owner, &p, &100),
+        Err(Ok(Error::ForbiddenTarget))
+    );
+
+    let mut p = params(&s);
+    p.target = s.cron.config().executor.unwrap();
     assert_eq!(
         s.cron.try_create_job(&s.owner, &p, &100),
         Err(Ok(Error::ForbiddenTarget))
@@ -526,4 +541,86 @@ fn pause_blocks_activity_but_not_exits() {
 
     s.cron.set_paused(&false);
     assert!(!s.cron.config().paused);
+}
+
+// ---------------------------------------------------------------------------
+// Executor
+// ---------------------------------------------------------------------------
+
+#[test]
+fn execute_requires_executor() {
+    let s = setup_without_executor();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    assert!(!s.cron.is_due(&id));
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &id),
+        Err(Ok(Error::ExecutorNotSet))
+    );
+}
+
+#[test]
+fn executor_can_only_be_set_once() {
+    let s = setup();
+    let other = Address::generate(&s.env);
+    assert_eq!(
+        s.cron.try_set_executor(&other),
+        Err(Ok(Error::ExecutorAlreadySet))
+    );
+}
+
+/// A job must not be able to act with the registry's authority, even
+/// against a token the registry holds but doesn't list as fee/stake token.
+#[test]
+fn targets_cannot_use_registry_authority() {
+    let s = setup();
+
+    let other_token = s
+        .env
+        .register_stellar_asset_contract_v2(s.admin.clone())
+        .address();
+    StellarAssetClient::new(&s.env, &other_token).mint(&s.cron.address, &500);
+    let attacker = Address::generate(&s.env);
+
+    let benign = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let mut p = params(&s);
+    p.target = other_token.clone();
+    p.function = Symbol::new(&s.env, "transfer");
+    p.args = vec![
+        &s.env,
+        s.cron.address.into_val(&s.env),
+        attacker.into_val(&s.env),
+        500i128.into_val(&s.env),
+    ];
+    let malicious = s.cron.create_job(&s.owner, &p, &100);
+
+    // From here on only the keeper's signature exists; nothing is mocked for
+    // the registry. The benign job proves that is enough for a normal run.
+    s.env.mock_auths(&[MockAuth {
+        address: &s.keeper,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "execute",
+            args: (s.keeper.clone(), benign).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    s.cron.execute(&s.keeper, &benign);
+    assert_eq!(s.target.count(), 1);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &s.keeper,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "execute",
+            args: (s.keeper.clone(), malicious).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_execute(&s.keeper, &malicious).is_err());
+
+    let other = TokenClient::new(&s.env, &other_token);
+    assert_eq!(other.balance(&s.cron.address), 500);
+    assert_eq!(other.balance(&attacker), 0);
 }

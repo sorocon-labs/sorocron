@@ -13,16 +13,25 @@ SoroCron automates **functions that are safe for anyone to call at any time**, t
 
 The target contract itself must enforce whether the call is valid. SoroCron only decides **when** it is called.
 
-## Invoker authority
+## Invoker authority and the executor split
 
-The registry calls targets directly, so inside the target the registry is the invoking contract. That means `registry_address.require_auth()` succeeds inside a target.
+In Soroban, when contract A calls contract B, `A.require_auth()` succeeds inside B automatically. If the registry called targets itself, every job would run with the authority of the contract that custodies all job deposits and keeper stakes. For example, a job targeting `token.transfer(registry → attacker)` would drain it.
 
-Consequences:
+SoroCron separates the two roles:
 
-1. **Never give the registry privileges.** Don't make the SoroCron registry an admin, owner, or allow-listed caller of your contract. Any job owner can schedule any call, so any privilege you grant the registry is granted to everyone.
-2. **The registry refuses to target itself, its fee token, or its stake token.** Otherwise a malicious job could call `token.transfer(registry → attacker)` with the registry's own authority and drain escrowed fees and stakes. Covered by `create_job_rejects_custodied_token_and_self_as_target`.
+| Contract | Holds funds | Calls targets |
+|---|---|---|
+| Registry (`contracts/registry`) | yes | never |
+| Executor (`contracts/executor`) | no | yes, and only when the registry asks |
 
-Planned hardening: move execution into a separate executor contract that holds no funds, so the registry's authority is never exposed to targets at all.
+Targets only ever see the executor as their invoker, and the executor owns nothing. The test `targets_cannot_use_registry_authority` proves that a job targeting a token the registry holds cannot move it.
+
+The executor is connected once with `set_executor` and can never be swapped, so users can verify which executor their jobs run through.
+
+Consequences for integrators:
+
+1. **Never give the executor (or the registry) privileges.** Don't make either an admin, owner, or allow-listed caller of your contract. Any job owner can schedule any call, so a privilege granted to the executor is granted to everyone.
+2. **Defence in depth:** jobs still may not target the registry, the executor, or the fee and stake tokens (`ForbiddenTarget`).
 
 ## Other properties
 

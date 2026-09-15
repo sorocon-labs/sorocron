@@ -2,7 +2,7 @@
 
 SoroCron has three layers:
 
-1. **Registry contract** (`contracts/registry`): the on-chain source of truth. It stores jobs, escrows fees, tracks keeper stake, and executes jobs.
+1. **Registry contract** (`contracts/registry`): the on-chain source of truth. It stores jobs, escrows fees, tracks keeper stake, and decides when jobs run. **Executor contract** (`contracts/executor`): performs the actual target calls on the registry's behalf and holds no funds (see [security](security.md)).
 2. **Keeper nodes** (`keeper-bot`): off-chain processes that watch the registry and submit `execute` transactions when jobs are due. Anyone can run one.
 3. **Integrations**: target contracts (the functions being automated) and optional resolver contracts (conditions).
 
@@ -12,6 +12,7 @@ sequenceDiagram
     participant Registry as SoroCron registry
     participant Keeper as Keeper node
     participant Resolver as Resolver (optional)
+    participant Executor as Executor
     participant Target as Target contract
     participant Token as Fee token (SEP-41)
 
@@ -27,7 +28,8 @@ sequenceDiagram
     Registry->>Resolver: should_run(job_id)
     Resolver-->>Registry: true
     Registry->>Registry: runs += 1, balance -= fee, next_run += interval
-    Registry->>Target: function(args)
+    Registry->>Executor: execute(target, function, args)
+    Executor->>Target: function(args)
     Registry->>Token: transfer(registry → keeper, fee_per_run)
 ```
 
@@ -87,3 +89,5 @@ The registry calls it with `try_invoke_contract`, so a resolver that panics or d
 | 13 | `KeeperUnbonding` | Keeper is unbonding |
 | 14 | `UnbondingNotStarted` | `withdraw_stake` before `begin_unbonding` |
 | 15 | `UnbondingNotFinished` | Unbonding period not over |
+| 16 | `ExecutorNotSet` | Admin hasn't connected the executor yet |
+| 17 | `ExecutorAlreadySet` | The executor can only be set once |

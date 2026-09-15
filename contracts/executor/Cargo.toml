@@ -1,6 +1,6 @@
 [package]
-name = "sorocron-registry"
-description = "SoroCron registry: scheduled and conditional job execution by staked keepers"
+name = "sorocron-executor"
+description = "SoroCron executor: fund-less contract that performs job target calls"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,4 +16,3 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-sorocron-executor = { path = "../executor" }

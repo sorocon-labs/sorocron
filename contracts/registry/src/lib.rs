@@ -6,13 +6,14 @@
 //! prepaying a per-run fee. Staked keepers watch for due jobs, execute them,
 //! and collect the fee.
 //!
-//! Security model (see `docs/security.md`): targets are called with this
-//! registry as the invoker, so jobs are meant for functions that are safe for
-//! anyone to call. The registry refuses to target itself or the tokens it
-//! custodies.
+//! Security model (see `docs/security.md`): the registry custodies funds but
+//! never calls job targets itself. Target calls go through a separate
+//! executor contract that holds nothing, so jobs can't borrow the registry's
+//! authority.
 
 mod errors;
 mod events;
+mod executor;
 mod storage;
 #[cfg(test)]
 mod test;
@@ -21,8 +22,9 @@ mod types;
 pub use errors::Error;
 pub use types::{Config, Job, JobParams, Keeper};
 
+use executor::ExecutorClient;
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol, Val,
+    contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol,
 };
 
 /// Function a resolver contract must expose: `should_run(job_id: u64) -> bool`.
@@ -34,6 +36,8 @@ pub struct SoroCron;
 #[contractimpl]
 impl SoroCron {
     /// Initializes the registry. Runs exactly once, at deploy time.
+    /// The executor is connected afterwards with `set_executor`, because it
+    /// needs the registry's address in its own constructor.
     pub fn __constructor(
         env: Env,
         admin: Address,
@@ -54,6 +58,7 @@ impl SoroCron {
                 min_stake,
                 unbonding_period,
                 paused: false,
+                executor: None,
             },
         );
     }
@@ -83,10 +88,7 @@ impl SoroCron {
         if deposit < params.fee_per_run {
             return Err(Error::InvalidAmount);
         }
-        if params.target == env.current_contract_address()
-            || params.target == config.fee_token
-            || params.target == config.stake_token
-        {
+        if is_forbidden_target(&env, &config, &params.target) {
             return Err(Error::ForbiddenTarget);
         }
 
@@ -179,11 +181,12 @@ impl SoroCron {
         Ok(job.balance)
     }
 
-    /// Executes a due job: calls the target, advances the schedule and pays
-    /// `fee_per_run` to the calling keeper.
+    /// Executes a due job: calls the target through the executor, advances
+    /// the schedule and pays `fee_per_run` to the calling keeper.
     pub fn execute(env: Env, keeper: Address, job_id: u64) -> Result<(), Error> {
         let config = storage::load_config(&env);
         ensure_not_paused(&config)?;
+        let executor = config.executor.clone().ok_or(Error::ExecutorNotSet)?;
         keeper.require_auth();
 
         let mut keeper_info = storage::get_keeper(&env, &keeper).ok_or(Error::KeeperNotFound)?;
@@ -206,7 +209,7 @@ impl SoroCron {
         storage::set_keeper(&env, &keeper, &keeper_info);
 
         // Interactions.
-        env.invoke_contract::<Val>(&job.target, &job.function, job.args.clone());
+        ExecutorClient::new(&env, &executor).execute(&job.target, &job.function, &job.args);
         token::TokenClient::new(&env, &config.fee_token).transfer(
             &env.current_contract_address(),
             &keeper,
@@ -319,6 +322,20 @@ impl SoroCron {
     // Admin
     // ------------------------------------------------------------------
 
+    /// Connects the executor contract. Can only be done once, so users can
+    /// verify which executor their jobs will run through.
+    pub fn set_executor(env: Env, executor: Address) -> Result<(), Error> {
+        let mut config = storage::load_config(&env);
+        config.admin.require_auth();
+        if config.executor.is_some() {
+            return Err(Error::ExecutorAlreadySet);
+        }
+        config.executor = Some(executor.clone());
+        storage::set_config(&env, &config);
+        events::ExecutorSet { executor }.publish(&env);
+        Ok(())
+    }
+
     /// Emergency switch. While paused, no jobs run and no new funds enter;
     /// cancellations and stake withdrawals keep working.
     pub fn set_paused(env: Env, paused: bool) {
@@ -367,7 +384,7 @@ impl SoroCron {
     /// (ignoring keeper eligibility).
     pub fn is_due(env: Env, job_id: u64) -> bool {
         let config = storage::load_config(&env);
-        if config.paused {
+        if config.paused || config.executor.is_none() {
             return false;
         }
         match storage::get_job(&env, job_id) {
@@ -377,6 +394,16 @@ impl SoroCron {
             None => false,
         }
     }
+}
+
+/// Jobs may not target SoroCron's own contracts or the tokens it custodies.
+/// The executor split already stops targets from using the registry's
+/// authority; this is defence in depth.
+fn is_forbidden_target(env: &Env, config: &Config, target: &Address) -> bool {
+    *target == env.current_contract_address()
+        || config.executor.as_ref() == Some(target)
+        || *target == config.fee_token
+        || *target == config.stake_token
 }
 
 fn ensure_not_paused(config: &Config) -> Result<(), Error> {

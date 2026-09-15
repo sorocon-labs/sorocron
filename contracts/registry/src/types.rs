@@ -12,6 +12,8 @@ pub struct Config {
     /// Seconds between `begin_unbonding` and `withdraw_stake`.
     pub unbonding_period: u64,
     pub paused: bool,
+    /// Contract that performs target calls. Set once via `set_executor`.
+    pub executor: Option<Address>,
 }
 
 /// Input to `create_job`.
