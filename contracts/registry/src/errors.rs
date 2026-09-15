@@ -24,4 +24,5 @@ pub enum Error {
     ExecutorNotSet = 16,
     ExecutorAlreadySet = 17,
     NoPendingAdmin = 18,
+    JobPaused = 19,
 }

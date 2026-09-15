@@ -717,3 +717,66 @@ fn only_admin_proposes_and_only_proposed_accepts() {
     s.cron.accept_admin();
     assert_eq!(s.cron.config().admin, new_admin);
 }
+
+// ---------------------------------------------------------------------------
+// Per-job pause
+// ---------------------------------------------------------------------------
+
+#[test]
+fn owner_can_pause_and_resume_a_job() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    assert!(s.cron.get_job(&id).unwrap().active);
+
+    s.cron.set_job_active(&id, &false);
+    assert!(!s.cron.get_job(&id).unwrap().active);
+    assert!(!s.cron.is_due(&id));
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &id),
+        Err(Ok(Error::JobPaused))
+    );
+
+    // Funding still works while paused.
+    assert_eq!(s.cron.fund_job(&s.owner, &id, &10), 110);
+
+    s.cron.set_job_active(&id, &true);
+    assert!(s.cron.is_due(&id));
+    s.cron.execute(&s.keeper, &id);
+    assert_eq!(s.target.count(), 1);
+}
+
+#[test]
+fn paused_job_can_still_be_cancelled() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.set_job_active(&id, &false);
+    assert_eq!(s.cron.cancel_job(&id), 100);
+}
+
+#[test]
+fn only_owner_can_pause_a_job() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_job_active",
+            args: (id, false).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_job_active(&id, &false).is_err());
+    assert!(s.cron.get_job(&id).unwrap().active);
+}
+
+#[test]
+fn pausing_missing_job_fails() {
+    let s = setup();
+    assert_eq!(
+        s.cron.try_set_job_active(&7, &false),
+        Err(Ok(Error::JobNotFound))
+    );
+}

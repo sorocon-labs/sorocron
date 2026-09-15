@@ -47,6 +47,14 @@ pub struct JobCancelled {
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobActiveSet {
+    #[topic]
+    pub job_id: u64,
+    pub active: bool,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeeperStaked {
     #[topic]
     pub keeper: Address,
