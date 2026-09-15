@@ -86,6 +86,18 @@ pub fn set_keeper(env: &Env, keeper: &Address, info: &Keeper) {
     extend_persistent(env, &key);
 }
 
+pub fn get_pending_admin(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::PendingAdmin)
+}
+
+pub fn set_pending_admin(env: &Env, admin: &Address) {
+    env.storage().instance().set(&DataKey::PendingAdmin, admin);
+}
+
+pub fn remove_pending_admin(env: &Env) {
+    env.storage().instance().remove(&DataKey::PendingAdmin);
+}
+
 pub fn remove_keeper(env: &Env, keeper: &Address) {
     env.storage()
         .persistent()

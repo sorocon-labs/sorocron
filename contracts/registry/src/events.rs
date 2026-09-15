@@ -72,6 +72,20 @@ pub struct KeeperWithdrawn {
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposed {
+    pub current: Address,
+    pub proposed: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminChanged {
+    pub previous: Address,
+    pub new_admin: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutorSet {
     pub executor: Address,
 }

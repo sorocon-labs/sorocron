@@ -336,6 +336,43 @@ impl SoroCron {
         Ok(())
     }
 
+    /// Starts an admin handover. The proposed admin must call `accept_admin`
+    /// to take over. Proposing again replaces the pending proposal.
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        let config = storage::load_config(&env);
+        config.admin.require_auth();
+        storage::set_pending_admin(&env, &new_admin);
+        events::AdminProposed {
+            current: config.admin,
+            proposed: new_admin,
+        }
+        .publish(&env);
+    }
+
+    /// Completes an admin handover. Must be signed by the proposed admin,
+    /// which proves the new key is controlled before the old one lets go.
+    pub fn accept_admin(env: Env) -> Result<(), Error> {
+        let mut config = storage::load_config(&env);
+        let pending = storage::get_pending_admin(&env).ok_or(Error::NoPendingAdmin)?;
+        pending.require_auth();
+
+        storage::remove_pending_admin(&env);
+        let previous = core::mem::replace(&mut config.admin, pending.clone());
+        storage::set_config(&env, &config);
+
+        events::AdminChanged {
+            previous,
+            new_admin: pending,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Admin proposed with `propose_admin` that hasn't accepted yet.
+    pub fn pending_admin(env: Env) -> Option<Address> {
+        storage::get_pending_admin(&env)
+    }
+
     /// Emergency switch. While paused, no jobs run and no new funds enter;
     /// cancellations and stake withdrawals keep working.
     pub fn set_paused(env: Env, paused: bool) {

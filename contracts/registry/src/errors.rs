@@ -23,4 +23,5 @@ pub enum Error {
     UnbondingNotFinished = 15,
     ExecutorNotSet = 16,
     ExecutorAlreadySet = 17,
+    NoPendingAdmin = 18,
 }
