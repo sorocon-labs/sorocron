@@ -47,7 +47,7 @@ Consequences for integrators:
 ## Known limitations
 
 - **Keeper racing:** execution is first-come-first-served. Rotation and slashing are planned.
-- **Admin trust:** the admin can pause the registry and change `min_stake`. The admin cannot move user funds. Admin transfer is not implemented yet.
+- **Admin trust:** the admin can pause the registry, change `min_stake`, and connect the executor once. The admin cannot move user funds or swap the executor. Handover uses a two-step `propose_admin` / `accept_admin` flow, so control can't be sent to an address nobody controls.
 - **Failing jobs:** a job whose target always panics stays "due" forever and wastes keeper simulations. Planned: failure tracking and auto-deactivation.
 
 ## Reporting a vulnerability

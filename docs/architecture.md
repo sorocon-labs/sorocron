@@ -37,9 +37,10 @@ sequenceDiagram
 
 | Key | Storage | Contents |
 |---|---|---|
-| `Config` | instance | admin, fee token, stake token, min stake, unbonding period, paused flag |
+| `Config` | instance | admin, fee token, stake token, min stake, unbonding period, paused flag, executor |
 | `NextJobId` | instance | monotonically increasing job id counter |
-| `Job(u64)` | persistent | owner, target, function, args, interval, next_run, fee_per_run, balance, max_runs, runs, resolver |
+| `PendingAdmin` | instance | admin proposed via `propose_admin`, until accepted |
+| `Job(u64)` | persistent | owner, target, function, args, interval, next_run, fee_per_run, balance, max_runs, runs, resolver, active |
 | `Keeper(Address)` | persistent | stake, unbonding_at, executions |
 
 Every read and write of a persistent entry extends its TTL (30 days), so active jobs and keepers never get archived. The instance is extended to 7 days on every call.
