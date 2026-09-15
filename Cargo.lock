@@ -1738,6 +1738,14 @@ version = "0.1.0"
 dependencies = [
  "soroban-sdk",
  "sorocron-executor",
+ "sorocron-ttl-guardian",
+]
+
+[[package]]
+name = "sorocron-ttl-guardian"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
