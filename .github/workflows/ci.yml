@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  contracts:
+    name: Contracts (fmt, clippy, test, wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --release --target wasm32v1-none
+      - name: Report WASM sizes
+        run: ls -l target/wasm32v1-none/release/*.wasm
+
+  keeper-bot:
+    name: Keeper bot (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: keeper-bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: keeper-bot/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck

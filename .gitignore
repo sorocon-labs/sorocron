@@ -1,0 +1,8 @@
+target/
+**/test_snapshots/
+node_modules/
+dist/
+.env
+.stellar/
+.soroban/
+*.log
