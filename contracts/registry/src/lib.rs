@@ -113,6 +113,7 @@ impl SoroCron {
             max_runs: params.max_runs,
             runs: 0,
             resolver: params.resolver,
+            active: true,
         };
         storage::set_job(&env, &job);
 
@@ -179,6 +180,20 @@ impl SoroCron {
         }
         .publish(&env);
         Ok(job.balance)
+    }
+
+    /// Pauses (`active = false`) or resumes a job. A paused job keeps its
+    /// balance and schedule but can't be executed; funding and cancelling
+    /// still work. Owner only.
+    pub fn set_job_active(env: Env, job_id: u64, active: bool) -> Result<(), Error> {
+        let mut job = storage::get_job(&env, job_id).ok_or(Error::JobNotFound)?;
+        job.owner.require_auth();
+
+        job.active = active;
+        storage::set_job(&env, &job);
+
+        events::JobActiveSet { job_id, active }.publish(&env);
+        Ok(())
     }
 
     /// Executes a due job: calls the target through the executor, advances
@@ -462,6 +477,9 @@ fn ensure_active_keeper(config: &Config, keeper: &Keeper) -> Result<(), Error> {
 }
 
 fn ensure_due(job: &Job, now: u64) -> Result<(), Error> {
+    if !job.active {
+        return Err(Error::JobPaused);
+    }
     if job.max_runs != 0 && job.runs >= job.max_runs {
         return Err(Error::MaxRunsReached);
     }

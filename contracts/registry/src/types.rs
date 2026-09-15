@@ -55,6 +55,8 @@ pub struct Job {
     pub max_runs: u32,
     pub runs: u32,
     pub resolver: Option<Address>,
+    /// `false` while the owner has paused the job.
+    pub active: bool,
 }
 
 #[contracttype]
