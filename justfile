@@ -2,7 +2,7 @@
 #
 # Works on Linux, macOS, and Windows (Git Bash) the same way `just` itself
 # does: recipes below only use commands already required by CONTRIBUTING.md
-# (cargo, npm), no shell-specific syntax.
+# (cargo, npm), no shell-specific syntax. PowerShell is also supported.
 
 # List available recipes.
 default:
