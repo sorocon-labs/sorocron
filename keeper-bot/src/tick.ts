@@ -5,6 +5,7 @@
  * tested with a fake registry instead of a live network.
  */
 import { EXPLORER } from "./config.js";
+import { withRetry } from "./retry.js";
 
 export interface SentLike {
   sendTransactionResponse?: { hash?: string };
@@ -30,12 +31,14 @@ export interface RegistryLike {
 export type Logger = (message: string) => void;
 
 export async function tick(registry: RegistryLike, keeper: string, log: Logger): Promise<void> {
-  const count: bigint = (await registry.job_count()).result;
+  // job_count/is_due are read-only simulations: safe to retry blindly on
+  // whatever transient RPC error comes back (timeouts, 5xx, network blips).
+  const count: bigint = (await withRetry(() => registry.job_count())).result;
 
   for (let jobId = 0n; jobId < count; jobId++) {
     let due = false;
     try {
-      due = (await registry.is_due({ job_id: jobId })).result;
+      due = (await withRetry(() => registry.is_due({ job_id: jobId }))).result;
     } catch {
       continue;
     }
