@@ -388,6 +388,22 @@ impl SoroCron {
         storage::get_pending_admin(&env)
     }
 
+    /// Withdraws a pending admin proposal. Current admin only.
+    pub fn cancel_admin_proposal(env: Env) -> Result<(), Error> {
+        let config = storage::load_config(&env);
+        config.admin.require_auth();
+
+        let pending = storage::get_pending_admin(&env).ok_or(Error::NoPendingAdmin)?;
+        storage::remove_pending_admin(&env);
+
+        events::AdminProposalCancelled {
+            current: config.admin,
+            cancelled: pending,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
     /// Emergency switch. While paused, no jobs run and no new funds enter;
     /// cancellations and stake withdrawals keep working.
     pub fn set_paused(env: Env, paused: bool) {

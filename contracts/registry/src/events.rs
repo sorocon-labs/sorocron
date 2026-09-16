@@ -87,6 +87,13 @@ pub struct AdminProposed {
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposalCancelled {
+    pub current: Address,
+    pub cancelled: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdminChanged {
     pub previous: Address,
     pub new_admin: Address,

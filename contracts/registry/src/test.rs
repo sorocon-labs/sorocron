@@ -676,6 +676,49 @@ fn accept_admin_without_proposal_fails() {
 }
 
 #[test]
+fn cancel_admin_proposal_clears_pending_and_blocks_accept() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+
+    s.cron.propose_admin(&new_admin);
+    assert_eq!(s.cron.pending_admin(), Some(new_admin.clone()));
+
+    s.cron.cancel_admin_proposal();
+    assert_eq!(s.cron.pending_admin(), None);
+    assert_eq!(s.cron.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+    assert_eq!(s.cron.config().admin, s.admin);
+}
+
+#[test]
+fn cancel_admin_proposal_requires_no_pending_proposal() {
+    let s = setup();
+    assert_eq!(
+        s.cron.try_cancel_admin_proposal(),
+        Err(Ok(Error::NoPendingAdmin))
+    );
+}
+
+#[test]
+fn only_admin_can_cancel_admin_proposal() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+    let stranger = Address::generate(&s.env);
+    s.cron.propose_admin(&new_admin);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "cancel_admin_proposal",
+            args: ().into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_cancel_admin_proposal().is_err());
+    assert_eq!(s.cron.pending_admin(), Some(new_admin));
+}
+
+#[test]
 fn new_admin_proposal_replaces_pending_one() {
     let s = setup();
     let first = Address::generate(&s.env);
