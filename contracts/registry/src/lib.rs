@@ -519,7 +519,9 @@ impl SoroCron {
     /// `limit` is capped at `MAX_GET_JOBS_LIMIT`.
     pub fn get_jobs(env: Env, start: u64, limit: u32) -> Vec<Job> {
         let limit = limit.min(MAX_GET_JOBS_LIMIT);
-        let end = start.saturating_add(limit as u64).min(storage::next_job_id(&env));
+        let end = start
+            .saturating_add(limit as u64)
+            .min(storage::next_job_id(&env));
 
         let mut jobs = Vec::new(&env);
         let mut id = start;

@@ -4,7 +4,9 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short,
     testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
-    vec, xdr::ToXdr, Address, Env, Event as _, IntoVal, Symbol, Val, Vec,
+    vec,
+    xdr::ToXdr,
+    Address, Env, Event as _, IntoVal, Symbol, Val, Vec,
 };
 use sorocron_executor::Executor;
 use sorocron_ttl_guardian::TtlGuardian;
@@ -532,10 +534,7 @@ fn jobs_by_owner_tracks_creation_and_cancellation() {
 
     let first = s.cron.create_job(&s.owner, &params(&s), &100);
     let second = s.cron.create_job(&s.owner, &params(&s), &100);
-    assert_eq!(
-        s.cron.jobs_by_owner(&s.owner),
-        vec![&s.env, first, second]
-    );
+    assert_eq!(s.cron.jobs_by_owner(&s.owner), vec![&s.env, first, second]);
 
     s.cron.cancel_job(&first);
     assert_eq!(s.cron.jobs_by_owner(&s.owner), vec![&s.env, second]);
@@ -567,16 +566,15 @@ fn job_exhausted_event_fires_exactly_when_balance_drops_below_one_fee() {
     assert!(!emitted(&s, &not_yet));
 
     advance(&s.env, INTERVAL);
-    s.env
-        .mock_auths(&[MockAuth {
-            address: &s.keeper,
-            invoke: &MockAuthInvoke {
-                contract: &s.cron.address,
-                fn_name: "execute",
-                args: (s.keeper.clone(), id).into_val(&s.env),
-                sub_invokes: &[],
-            },
-        }]);
+    s.env.mock_auths(&[MockAuth {
+        address: &s.keeper,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "execute",
+            args: (s.keeper.clone(), id).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
     s.cron.execute(&s.keeper, &id);
     let expected = events::JobExhausted {
         job_id: id,
