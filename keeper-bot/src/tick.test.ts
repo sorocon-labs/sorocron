@@ -202,3 +202,71 @@ describe("tick profitability check (#22)", () => {
     expect(sent).toEqual([0n]);
   });
 });
+
+describe("tick concurrency (#48)", () => {
+  it("checks is_due concurrently, but still builds/simulates/sends each due job one at a time, in job id order", async () => {
+    let dueCheckInFlight = 0;
+    let maxDueCheckInFlight = 0;
+    let buildOrSendInFlight = 0;
+    let maxBuildOrSendInFlight = 0;
+    const submitted: bigint[] = [];
+
+    const registry = fakeRegistry({
+      job_count: async () => ({ result: 5n }),
+      is_due: async ({ job_id }) => {
+        dueCheckInFlight++;
+        maxDueCheckInFlight = Math.max(maxDueCheckInFlight, dueCheckInFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        dueCheckInFlight--;
+        return { result: job_id !== 2n }; // every job but #2 is due
+      },
+      execute: async ({ job_id }) => {
+        // Building a transaction bakes in the account's sequence number, so
+        // this must never overlap another job's build or send either.
+        buildOrSendInFlight++;
+        maxBuildOrSendInFlight = Math.max(maxBuildOrSendInFlight, buildOrSendInFlight);
+        await new Promise((r) => setTimeout(r, 2));
+        buildOrSendInFlight--;
+        return {
+          result: undefined,
+          signAndSend: async () => {
+            buildOrSendInFlight++;
+            maxBuildOrSendInFlight = Math.max(maxBuildOrSendInFlight, buildOrSendInFlight);
+            await new Promise((r) => setTimeout(r, 5));
+            buildOrSendInFlight--;
+            submitted.push(job_id);
+            return {};
+          },
+        };
+      },
+    });
+    const { log } = collectLogs();
+
+    await tick(registry, KEEPER, log, { maxConcurrency: 4 });
+
+    expect(maxDueCheckInFlight).toBeGreaterThan(1);
+    expect(maxBuildOrSendInFlight).toBe(1);
+    expect(submitted).toEqual([0n, 1n, 3n, 4n]);
+  });
+
+  it("defaults to fully sequential is_due checks when maxConcurrency is omitted", async () => {
+    let maxDueCheckInFlight = 0;
+    let dueCheckInFlight = 0;
+    const registry = fakeRegistry({
+      job_count: async () => ({ result: 3n }),
+      is_due: async () => {
+        dueCheckInFlight++;
+        maxDueCheckInFlight = Math.max(maxDueCheckInFlight, dueCheckInFlight);
+        await new Promise((r) => setTimeout(r, 1));
+        dueCheckInFlight--;
+        return { result: true };
+      },
+      execute: async () => ({ result: undefined, signAndSend: async () => ({}) }),
+    });
+    const { log } = collectLogs();
+
+    await tick(registry, KEEPER, log);
+
+    expect(maxDueCheckInFlight).toBe(1);
+  });
+});
