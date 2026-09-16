@@ -1,0 +1,172 @@
+name: Issue Assignment
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  assign:
+    name: Manage Issue Assignment
+    if: ${{ !github.event.issue.pull_request && !github.event.comment.user.bot }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Process assignment command
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commentBody = context.payload.comment.body.trim();
+            const commenter = context.payload.comment.user.login;
+            const issueNumber = context.payload.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const commentId = context.payload.comment.id;
+            const authorAssociation = context.payload.comment.author_association;
+            const currentAssignees = (context.payload.issue.assignees || []).map(a => a.login);
+
+            // Maintainers with admin rights or explicit CODEOWNER authority to notify
+            const MAINTAINERS = ['bestbisong'];
+            const notifyTags = MAINTAINERS.map(m => `@${m}`).join(' ');
+
+            // Helper to check if user is an admin, owner, or listed maintainer
+            async function isMaintainer(username) {
+              if (MAINTAINERS.map(m => m.toLowerCase()).includes(username.toLowerCase())) {
+                return true;
+              }
+              if (username.toLowerCase() === owner.toLowerCase()) {
+                return true;
+              }
+              if (authorAssociation === 'OWNER') {
+                return true;
+              }
+
+              try {
+                const res = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner,
+                  repo,
+                  username,
+                });
+                return res.data.permission === 'admin';
+              } catch (e) {
+                return false;
+              }
+            }
+
+            async function addReaction(reaction) {
+              try {
+                await github.rest.reactions.createForIssueComment({
+                  owner,
+                  repo,
+                  comment_id: commentId,
+                  content: reaction,
+                });
+              } catch (e) {
+                console.log('Failed to add reaction:', e.message);
+              }
+            }
+
+            async function reply(message) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body: message,
+              });
+            }
+
+            const isCommenterMaintainer = await isMaintainer(commenter);
+
+            // Match lines starting with commands
+            const lines = commentBody.split('\n').map(l => l.trim()).filter(Boolean);
+
+            for (const line of lines) {
+              // 1. Maintainer assigns user(s): "/assign @user1 @user2"
+              const assignUserMatch = line.match(/^(?:\/|\.)assign\s+((?:@?[\w-]+\s*)+)$/i);
+              if (assignUserMatch) {
+                if (!isCommenterMaintainer) {
+                  await addReaction('eyes');
+                  await reply(`Hi @${commenter}, thanks for your interest! In accordance with our Drips and contribution guidelines, issues are assigned only by repository maintainers/admins. A maintainer will review your request shortly.\n\ncc ${notifyTags}`);
+                  return;
+                }
+
+                const users = assignUserMatch[1]
+                  .split(/\s+/)
+                  .map(u => u.replace(/^@/, '').trim())
+                  .filter(Boolean);
+
+                await github.rest.issues.addAssignees({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  assignees: users,
+                });
+                await addReaction('rocket');
+                await reply(`Assigned @${users.join(', @')} to this issue. Happy coding! 🚀`);
+                return;
+              }
+
+              // 2. Self-assign attempts: "/take", "/claim", "/assign", "/assign me"
+              const claimMatch = line.match(/^(?:\/|\.)(?:take|claim|assign\s+me|assign)$/i);
+              if (claimMatch) {
+                // If maintainer runs /assign or /take, allow self-assignment
+                if (isCommenterMaintainer) {
+                  if (currentAssignees.includes(commenter)) {
+                    await addReaction('eyes');
+                    await reply(`@${commenter}, you are already assigned to this issue.`);
+                    return;
+                  }
+                  await github.rest.issues.addAssignees({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    assignees: [commenter],
+                  });
+                  await addReaction('rocket');
+                  await reply(`Assigned @${commenter} to this issue. 🚀`);
+                  return;
+                }
+
+                // Non-maintainer attempting to self-claim: notify maintainers
+                await addReaction('eyes');
+                await reply(`Hi @${commenter}, thanks for your interest! In accordance with our Drips and contribution guidelines, issues are reviewed and assigned by repository maintainers. A maintainer will review your request shortly.\n\ncc ${notifyTags}`);
+                return;
+              }
+
+              // 3. Unassign: "/unassign", "/unassign @user", "/release"
+              const unassignMatch = line.match(/^(?:\/|\.)(?:unassign|release)(?:\s+((?:@?[\w-]+\s*)+))?$/i);
+              if (unassignMatch) {
+                const targetUsersStr = unassignMatch[1];
+                let usersToRemove = [];
+
+                if (targetUsersStr) {
+                  usersToRemove = targetUsersStr
+                    .split(/\s+/)
+                    .map(u => u.replace(/^@/, '').trim())
+                    .filter(Boolean);
+
+                  if (!isCommenterMaintainer) {
+                    const nonSelf = usersToRemove.filter(u => u.toLowerCase() !== commenter.toLowerCase());
+                    if (nonSelf.length > 0) {
+                      await addReaction('-1');
+                      await reply(`Hi @${commenter}, only repository maintainers can unassign other users.`);
+                      return;
+                    }
+                  }
+                } else {
+                  // If no target specified, unassign commenter (self-release if assigned)
+                  usersToRemove = [commenter];
+                }
+
+                await github.rest.issues.removeAssignees({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  assignees: usersToRemove,
+                });
+                await addReaction('+1');
+                await reply(`Unassigned @${usersToRemove.join(', @')} from this issue.\n\ncc ${notifyTags}`);
+                return;
+              }
+            }

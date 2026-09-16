@@ -8,8 +8,11 @@ Thanks for helping build automation infrastructure for Stellar! This guide gets 
    - `good first issue`: small, well-defined, great for your first Soroban PR
    - `complexity: trivial` / `complexity: medium` / `complexity: high`: rough size
    - `area: contracts` / `area: keeper-bot` / `area: examples` / `area: sdk` / `area: docs`
-2. **Comment on the issue to be assigned before you start.** Unassigned PRs for already-assigned issues may be closed.
-3. If you're participating through Drips Wave, follow the Wave's rules for claiming issues and timelines.
+2. **Comment on the issue to request assignment before you start.**
+   - Maintainers assign contributors to issues using `/assign @username`.
+   - If you are assigned but can no longer work on the issue, comment `/unassign` or `/release` so someone else can take over.
+   - *Note:* Unassigned PRs for already-assigned issues may be closed.
+3. If you're participating through Drips Wave, follow the Wave's rules for claiming issues and timelines (issues must be officially assigned by a maintainer before work begins).
 4. If you're stuck for more than a couple of days, say so on the issue. Asking is fine; going silent isn't.
 
 ## Setup
