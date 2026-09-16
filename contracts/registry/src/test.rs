@@ -497,6 +497,37 @@ fn jobs_by_owner_tracks_creation_and_cancellation() {
     assert_eq!(s.cron.jobs_by_owner(&s.owner), vec![&s.env, second]);
 }
 
+#[test]
+fn get_jobs_returns_empty_range() {
+    let s = setup();
+    s.cron.create_job(&s.owner, &params(&s), &100);
+    assert_eq!(s.cron.get_jobs(&5, &10), Vec::new(&s.env));
+    assert_eq!(s.cron.get_jobs(&0, &0), Vec::new(&s.env));
+}
+
+#[test]
+fn get_jobs_skips_cancelled_ids() {
+    let s = setup();
+    let first = s.cron.create_job(&s.owner, &params(&s), &100);
+    let second = s.cron.create_job(&s.owner, &params(&s), &100);
+    let third = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.cancel_job(&second);
+
+    let jobs = s.cron.get_jobs(&0, &10);
+    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs.get(0).unwrap().id, first);
+    assert_eq!(jobs.get(1).unwrap().id, third);
+}
+
+#[test]
+fn get_jobs_caps_limit() {
+    let s = setup();
+    for _ in 0..(crate::MAX_GET_JOBS_LIMIT + 5) {
+        s.cron.create_job(&s.owner, &params(&s), &100);
+    }
+    assert_eq!(s.cron.get_jobs(&0, &1_000).len(), crate::MAX_GET_JOBS_LIMIT);
+}
+
 // ---------------------------------------------------------------------------
 // Keeper staking
 // ---------------------------------------------------------------------------

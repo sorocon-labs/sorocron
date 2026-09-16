@@ -30,6 +30,9 @@ use soroban_sdk::{
 /// Function a resolver contract must expose: `should_run(job_id: u64) -> bool`.
 pub const RESOLVER_FN: &str = "should_run";
 
+/// Hard cap on `limit` in `get_jobs`, regardless of what the caller passes.
+pub const MAX_GET_JOBS_LIMIT: u32 = 50;
+
 #[contract]
 pub struct SoroCron;
 
@@ -442,6 +445,23 @@ impl SoroCron {
 
     pub fn get_keeper(env: Env, keeper: Address) -> Option<Keeper> {
         storage::get_keeper(&env, &keeper)
+    }
+
+    /// Jobs with ids in `[start, start + limit)`, skipping cancelled ids.
+    /// `limit` is capped at `MAX_GET_JOBS_LIMIT`.
+    pub fn get_jobs(env: Env, start: u64, limit: u32) -> Vec<Job> {
+        let limit = limit.min(MAX_GET_JOBS_LIMIT);
+        let end = start.saturating_add(limit as u64).min(storage::next_job_id(&env));
+
+        let mut jobs = Vec::new(&env);
+        let mut id = start;
+        while id < end {
+            if let Some(job) = storage::get_job(&env, id) {
+                jobs.push_back(job);
+            }
+            id += 1;
+        }
+        jobs
     }
 
     /// Ids of jobs currently owned by `owner`, most recently created last.
