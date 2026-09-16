@@ -86,7 +86,7 @@ impl DcaContract {
             .get(&PLAN)
             .expect("plan not initialized");
         let token_client = token::Client::new(&env, &plan.sell_token);
-        token_client.transfer(&from, &env.current_contract_address(), &amount);
+        token_client.transfer(&from, env.current_contract_address(), &amount);
         env.storage().instance().extend_ttl(100_000, 500_000);
     }
 

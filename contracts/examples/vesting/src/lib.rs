@@ -81,7 +81,7 @@ impl VestingContract {
 
         let token_addr: Address = env.storage().instance().get(&TOKEN).expect("token not set");
         let token_client = token::Client::new(&env, &token_addr);
-        token_client.transfer(&admin, &env.current_contract_address(), &total_amount);
+        token_client.transfer(&admin, env.current_contract_address(), &total_amount);
 
         let schedule = VestingSchedule {
             beneficiary: beneficiary.clone(),

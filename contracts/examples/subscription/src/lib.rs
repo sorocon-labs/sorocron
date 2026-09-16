@@ -70,7 +70,7 @@ impl SubscriptionContract {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(
             &subscriber,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &initial_deposit,
         );
 
@@ -100,7 +100,7 @@ impl SubscriptionContract {
 
         let token_addr: Address = env.storage().instance().get(&TOKEN).expect("token not set");
         let token_client = token::Client::new(&env, &token_addr);
-        token_client.transfer(&subscriber, &env.current_contract_address(), &amount);
+        token_client.transfer(&subscriber, env.current_contract_address(), &amount);
 
         let key = (SUB, subscriber.clone());
         let mut sub: Subscription = env
