@@ -143,7 +143,7 @@ A `stellar contract invoke` example for every registry function is in [docs/cli.
 
 `JobParams`: `target`, `function`, `args`, `interval` (seconds), `start_at` (unix time, `0` = now), `fee_per_run`, `max_runs` (`0` = unlimited), `end_at` (unix time, `0` = never), `resolver` (optional).
 
-A resolver is any contract exposing `should_run(job_id: u64) -> bool`.
+A resolver is any contract exposing `should_run(job_id: u64) -> bool`. (optional)
 
 ### Executor
 
