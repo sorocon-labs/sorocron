@@ -34,15 +34,13 @@ jobs:
           done
 
   keeper-bot:
-    name: Keeper bot (typecheck)
+    name: Keeper bot (typecheck, test)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: keeper-bot
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -50,3 +48,4 @@ jobs:
           cache-dependency-path: keeper-bot/package-lock.json
       - run: npm ci
       - run: npm run typecheck
+      - run: npm test

@@ -9,7 +9,8 @@
     "deploy:testnet": "tsx src/deploy.ts",
     "demo": "tsx src/demo.ts",
     "keeper": "tsx src/keeper.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^17.1.0",
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@types/node": "^26.5.1",
     "tsx": "^4.23.13",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^2.1.9"
   }
 }
