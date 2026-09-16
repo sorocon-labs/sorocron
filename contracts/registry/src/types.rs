@@ -76,4 +76,5 @@ pub enum DataKey {
     Job(u64),
     Keeper(Address),
     PendingAdmin,
+    OwnerJobs(Address),
 }

@@ -481,6 +481,22 @@ fn cancel_job_refunds_owner_and_removes_job() {
     assert_eq!(s.cron.try_cancel_job(&id), Err(Ok(Error::JobNotFound)));
 }
 
+#[test]
+fn jobs_by_owner_tracks_creation_and_cancellation() {
+    let s = setup();
+    assert_eq!(s.cron.jobs_by_owner(&s.owner), Vec::new(&s.env));
+
+    let first = s.cron.create_job(&s.owner, &params(&s), &100);
+    let second = s.cron.create_job(&s.owner, &params(&s), &100);
+    assert_eq!(
+        s.cron.jobs_by_owner(&s.owner),
+        vec![&s.env, first, second]
+    );
+
+    s.cron.cancel_job(&first);
+    assert_eq!(s.cron.jobs_by_owner(&s.owner), vec![&s.env, second]);
+}
+
 // ---------------------------------------------------------------------------
 // Keeper staking
 // ---------------------------------------------------------------------------

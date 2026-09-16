@@ -24,7 +24,7 @@ pub use types::{Config, Job, JobParams, Keeper};
 
 use executor::ExecutorClient;
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol,
+    contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol, Vec,
 };
 
 /// Function a resolver contract must expose: `should_run(job_id: u64) -> bool`.
@@ -116,6 +116,7 @@ impl SoroCron {
             active: true,
         };
         storage::set_job(&env, &job);
+        storage::add_owner_job(&env, &owner, id);
 
         events::JobCreated {
             job_id: id,
@@ -166,6 +167,7 @@ impl SoroCron {
         job.owner.require_auth();
 
         storage::remove_job(&env, job_id);
+        storage::remove_owner_job(&env, &job.owner, job_id);
         if job.balance > 0 {
             token::TokenClient::new(&env, &config.fee_token).transfer(
                 &env.current_contract_address(),
@@ -440,6 +442,12 @@ impl SoroCron {
 
     pub fn get_keeper(env: Env, keeper: Address) -> Option<Keeper> {
         storage::get_keeper(&env, &keeper)
+    }
+
+    /// Ids of jobs currently owned by `owner`, most recently created last.
+    /// Cancelled jobs are removed from this list.
+    pub fn jobs_by_owner(env: Env, owner: Address) -> Vec<u64> {
+        storage::owner_jobs(&env, &owner)
     }
 
     /// Number of job ids ever issued. Ids run from `0` to `job_count - 1`;

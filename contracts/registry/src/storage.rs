@@ -1,7 +1,7 @@
 //! Storage helpers. Every read or write of long-lived data extends its TTL,
 //! so active jobs and keepers are never archived.
 
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{Address, Env, Vec};
 
 use crate::types::{Config, DataKey, Job, Keeper};
 
@@ -102,4 +102,31 @@ pub fn remove_keeper(env: &Env, keeper: &Address) {
     env.storage()
         .persistent()
         .remove(&DataKey::Keeper(keeper.clone()));
+}
+
+pub fn owner_jobs(env: &Env, owner: &Address) -> Vec<u64> {
+    let key = DataKey::OwnerJobs(owner.clone());
+    let ids = env.storage().persistent().get(&key);
+    if ids.is_some() {
+        extend_persistent(env, &key);
+    }
+    ids.unwrap_or_else(|| Vec::new(env))
+}
+
+pub fn add_owner_job(env: &Env, owner: &Address, job_id: u64) {
+    let key = DataKey::OwnerJobs(owner.clone());
+    let mut ids = owner_jobs(env, owner);
+    ids.push_back(job_id);
+    env.storage().persistent().set(&key, &ids);
+    extend_persistent(env, &key);
+}
+
+pub fn remove_owner_job(env: &Env, owner: &Address, job_id: u64) {
+    let key = DataKey::OwnerJobs(owner.clone());
+    let mut ids = owner_jobs(env, owner);
+    if let Some(index) = ids.iter().position(|id| id == job_id) {
+        ids.remove(index as u32);
+        env.storage().persistent().set(&key, &ids);
+        extend_persistent(env, &key);
+    }
 }
