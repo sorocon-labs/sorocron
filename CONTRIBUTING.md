@@ -1,71 +1,139 @@
 # Contributing to SoroCron
 
-Thanks for helping build automation infrastructure for Stellar! This guide gets you from zero to a merged PR.
+Thanks for helping build trust-minimized, decentralized automation infrastructure for Stellar!
 
-## Picking an issue
+SoroCron is deliberately structured with clear module boundaries so multiple contributors can build and ship in parallel with minimal merge conflicts. This guide will take you from zero to a merged PR.
 
-1. Browse [open issues](../../issues). Labels tell you what to expect:
-   - `good first issue`: small, well-defined, great for your first Soroban PR
-   - `complexity: trivial` / `complexity: medium` / `complexity: high`: rough size
-   - `area: contracts` / `area: keeper-bot` / `area: examples` / `area: sdk` / `area: docs`
+---
+
+## Subsystem Map
+
+Find the area that matches your contribution. Keep changes scoped to their designated paths:
+
+| Subsystem | Paths | Scope & Responsibilities |
+|---|---|---|
+| **Core Registry** | `contracts/registry/` | Job scheduling, execution interval rules, keeper staking & reward accounting |
+| **Execution Engine** | `contracts/executor/` | Contract call dispatcher, gas enforcement, and caller authentication |
+| **TTL Guardian** | `contracts/ttl-guardian/` | Automated storage TTL renewal and persistent state rent maintenance |
+| **Example Workloads** | `contracts/examples/` | Reference recurring task contracts (e.g. DCA, auto-compound, batch payments) |
+| **Keeper Daemon** | `keeper-bot/` | TypeScript daemon: Horizon event poller, execution scheduler, tx signer |
+| **Deployments** | `deployments/` | Network configurations, contract addresses, WASM artifacts, and deploy scripts |
+| **Documentation** | `docs/` | Architecture decision records, threat models, API specs, and tutorials |
+
+---
+
+## Rules of the Road
+
+1. **Stay within your subsystem**: Avoid touching contracts when working on the `keeper-bot`, and vice-versa.
+2. **Core contract changes are delicate**:
+   - `contracts/registry/src/errors.rs` codes are strictly **append-only**. Never renumber or reuse an error code; external clients and keepers depend on them.
+   - Storage data keys (`storage.rs`) are immutable in structure. Document any schema changes in `docs/architecture.md`.
+3. **Keep PRs atomic**: One issue per PR. Do not bundle refactoring or unrelated formatting changes with new features or bugfixes.
+4. **Preserve cross-boundary contracts**: If you modify contract events in `events.rs`, ensure `keeper-bot` event parsers and types are updated in tandem.
+
+---
+
+## Picking an Issue & Drips Guidelines
+
+1. Browse [open issues](../../issues). Labels indicate domain and complexity:
+   - `good first issue`: small, well-defined, great for your first Soroban PR.
+   - `complexity: trivial` / `complexity: medium` / `complexity: high`: estimated scope.
+   - `area: contracts` / `area: keeper-bot` / `area: examples` / `area: sdk` / `area: docs`.
 2. **Comment on the issue to request assignment before you start.**
-   - Maintainers assign contributors to issues using `/assign @username`.
-   - If you are assigned but can no longer work on the issue, comment `/unassign` or `/release` so someone else can take over.
-   - *Note:* Unassigned PRs for already-assigned issues may be closed.
-3. If you're participating through Drips Wave, follow the Wave's rules for claiming issues and timelines (issues must be officially assigned by a maintainer before work begins).
-4. If you're stuck for more than a couple of days, say so on the issue. Asking is fine; going silent isn't.
+   - Maintainers officially assign contributors using `/assign @username`.
+   - If you can no longer work on an assigned issue, comment `/unassign` or `/release` so another contributor can take it over.
+   - *Note:* Unassigned PRs for already-assigned issues may be closed without review.
+3. If participating through **Drips Waves**, issues must be assigned by a maintainer before work begins to comply with wave limits and reward allocation.
+4. If you are blocked or stuck for more than 48 hours, please post an update on the issue so maintainers can assist.
 
-## Setup
+---
+
+## Local Development & Setup
+
+### 1. Prerequisites
 
 ```bash
-# Rust + the WASM target Soroban uses
+# Rust + WebAssembly target for Soroban
 rustup target add wasm32v1-none
 rustup component add rustfmt clippy
 
-# Contracts
-cargo test
-cargo build --release --target wasm32v1-none
-
-# Keeper bot
-cd keeper-bot
-npm install
-npm run typecheck
+# Install Node.js (v20+ recommended)
+node --version
 ```
 
-To try things on testnet, run `npm run deploy:testnet` and `npm run demo` in `keeper-bot/`. This deploys your own copy with a fresh funded key, so you won't touch the shared deployment.
-
-## Before opening a PR
-
-CI runs these; run them locally first:
+### 2. Contracts (Rust)
 
 ```bash
+# Run all contract unit & integration tests
+cargo test
+
+# Build release WASM contracts
+cargo build --release --target wasm32v1-none
+
+# Verify formatting and Clippy lints
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo test
-cd keeper-bot && npm run typecheck
 ```
 
-- **One issue per PR.** Reference it with `Closes #123`.
-- **Contract changes need tests** in `contracts/registry/src/test.rs` (or the example's test module). Cover the failure paths, not just the happy path.
-- **Keep PRs focused.** Don't bundle refactors or formatting changes with features.
+### 3. Keeper Bot (TypeScript)
 
-## Contract conventions
+```bash
+cd keeper-bot
 
-- **Error codes are append-only.** Never renumber or reuse a code in `errors.rs`; clients depend on them. Document new codes in `docs/architecture.md`.
-- **Events are public API.** Add a `#[contractevent]` in `events.rs` for any new state change, and don't change existing event fields without discussion.
-- **Checks, then effects, then interactions.** Validate and update storage before calling other contracts or moving tokens.
-- **Extend TTLs** on persistent data you read or write; use the helpers in `storage.rs`.
-- **Nothing in the registry should grant it privileges.** Read [docs/security.md](docs/security.md) before touching `create_job` or `execute`.
-- `#![no_std]`: no `std`, no heap-heavy crates. Watch the WASM size CI reports (the Soroban limit is 64 KB).
+# Install dependencies
+npm install
 
-## Commit messages
+# Typecheck and run tests
+npm run typecheck
+npm test
 
-Use short, imperative messages: `Add two-step admin transfer`, `Fix unbonding check in execute`.
+# Testnet deployment demo (uses isolated testnet funded key)
+npm run deploy:testnet
+npm run demo
+```
 
-## Security issues
+---
 
-Don't open public issues for vulnerabilities. See [docs/security.md](docs/security.md).
+## Contract Conventions & Invariants
 
-## Code of conduct
+All smart contracts in SoroCron adhere to strict production standards:
 
-Be kind and assume good faith. Review the code, not the person. Maintainers may remove comments or contributors that make the project hostile.
+- **`#![no_std]` & Size Budget**: Soroban rejects WASM binaries over 64 KB. No heap-heavy crates or `std` dependencies. CI enforces a 60 KB budget check.
+- **Checks, then Effects, then Interactions**: Always validate preconditions and update contract storage before making cross-contract calls or transferring tokens.
+- **Explicit Storage TTLs**: Every persistent read or write must extend its storage TTL using the helper routines in `storage.rs`.
+- **Events are Public API**: Emit a typed `#[contractevent]` for every state change. Do not rename or remove existing event fields without consensus.
+- **Zero Privileged Backdoors**: SoroCron contracts are self-contained. The registry never possesses special administrative power to siphon user funds. Read [docs/security.md](docs/security.md).
+
+---
+
+## Pre-PR Checklist
+
+Before opening a pull request, ensure the full validation passes locally:
+
+```bash
+# 1. Format & Lint
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+
+# 2. Contract Test Suite
+cargo test
+
+# 3. Keeper Bot Typecheck
+cd keeper-bot && npm run typecheck && cd ..
+```
+
+- **Commit Messages**: Use short, imperative titles (e.g. `feat(registry): add two-step admin transfer`, `fix(keeper): handle missing horizon cursor`).
+- **Linking Issues**: Include `Closes #123` or `Fixes #123` in your PR description.
+- **Test Coverage**: Any contract logic change must have unit tests covering both the happy path and failure/unauthorized paths in `src/test.rs`.
+
+---
+
+## Security Inquiries
+
+Do not report security vulnerabilities through public GitHub issues. Please refer to our [Security Policy](SECURITY.md) and report privately via [GitHub Security Advisories](https://github.com/sorocon-labs/sorocron/security/advisories/new).
+
+---
+
+## Code of Conduct
+
+We are dedicated to providing a welcoming and supportive environment for all contributors. Please review and adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
