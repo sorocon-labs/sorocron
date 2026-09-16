@@ -671,6 +671,81 @@ fn only_owner_can_withdraw_job_balance() {
     assert_eq!(s.cron.get_job(&id).unwrap().balance, 100);
 }
 
+#[test]
+fn min_interval_boundary() {
+    let s = setup();
+    s.cron.set_min_interval(&INTERVAL);
+
+    let mut too_short = params(&s);
+    too_short.interval = INTERVAL - 1;
+    assert_eq!(
+        s.cron.try_create_job(&s.owner, &too_short, &100),
+        Err(Ok(Error::IntervalTooShort))
+    );
+
+    let mut at_min = params(&s);
+    at_min.interval = INTERVAL;
+    assert!(s.cron.try_create_job(&s.owner, &at_min, &100).is_ok());
+}
+
+#[test]
+fn max_args_boundary() {
+    let s = setup();
+    s.cron.set_max_args(&2);
+
+    let mut too_many = params(&s);
+    too_many.args = vec![
+        &s.env,
+        1u32.into_val(&s.env),
+        2u32.into_val(&s.env),
+        3u32.into_val(&s.env),
+    ];
+    assert_eq!(
+        s.cron.try_create_job(&s.owner, &too_many, &100),
+        Err(Ok(Error::TooManyArgs))
+    );
+
+    let mut at_max = params(&s);
+    at_max.args = vec![&s.env, 1u32.into_val(&s.env), 2u32.into_val(&s.env)];
+    assert!(s.cron.try_create_job(&s.owner, &at_max, &100).is_ok());
+}
+
+#[test]
+fn min_interval_and_max_args_disabled_by_default() {
+    let s = setup();
+    let config = s.cron.config();
+    assert_eq!(config.min_interval, 0);
+    assert_eq!(config.max_args, 0);
+}
+
+#[test]
+fn only_admin_sets_min_interval_and_max_args() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_min_interval",
+            args: (5u64,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_min_interval(&5).is_err());
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_max_args",
+            args: (5u32,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_max_args(&5).is_err());
+}
+
 // ---------------------------------------------------------------------------
 // Keeper staking
 // ---------------------------------------------------------------------------

@@ -14,6 +14,10 @@ pub struct Config {
     pub paused: bool,
     /// Contract that performs target calls. Set once via `set_executor`.
     pub executor: Option<Address>,
+    /// Minimum `interval` a job may schedule, in seconds. `0` means no minimum.
+    pub min_interval: u64,
+    /// Maximum length of a job's `args` vector. `0` means no maximum.
+    pub max_args: u32,
 }
 
 /// Input to `create_job`.

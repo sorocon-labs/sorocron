@@ -136,3 +136,15 @@ pub struct PausedSet {
 pub struct MinStakeSet {
     pub min_stake: i128,
 }
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinIntervalSet {
+    pub min_interval: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MaxArgsSet {
+    pub max_args: u32,
+}

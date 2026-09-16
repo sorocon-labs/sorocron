@@ -37,7 +37,7 @@ sequenceDiagram
 
 | Key | Storage | Contents |
 |---|---|---|
-| `Config` | instance | admin, fee token, stake token, min stake, unbonding period, paused flag, executor |
+| `Config` | instance | admin, fee token, stake token, min stake, unbonding period, paused flag, executor, min interval, max args |
 | `NextJobId` | instance | monotonically increasing job id counter |
 | `PendingAdmin` | instance | admin proposed via `propose_admin`, until accepted |
 | `Job(u64)` | persistent | owner, target, function, args, interval, next_run, fee_per_run, balance, max_runs, runs, end_at, resolver, active |
@@ -115,3 +115,5 @@ The test `guardian_job_keeps_target_contract_from_being_archived` runs this end 
 | 18 | `NoPendingAdmin` | `accept_admin` called with no proposal outstanding |
 | 19 | `JobPaused` | The owner paused this job with `set_job_active` |
 | 20 | `JobExpired` | `now >= end_at` |
+| 21 | `IntervalTooShort` | `interval` below the admin-configured `min_interval` |
+| 22 | `TooManyArgs` | `args` longer than the admin-configured `max_args` |

@@ -63,6 +63,8 @@ impl SoroCron {
                 unbonding_period,
                 paused: false,
                 executor: None,
+                min_interval: 0,
+                max_args: 0,
             },
         );
     }
@@ -85,6 +87,12 @@ impl SoroCron {
 
         if params.interval == 0 {
             return Err(Error::InvalidInterval);
+        }
+        if config.min_interval != 0 && params.interval < config.min_interval {
+            return Err(Error::IntervalTooShort);
+        }
+        if config.max_args != 0 && params.args.len() > config.max_args {
+            return Err(Error::TooManyArgs);
         }
         if params.fee_per_run <= 0 {
             return Err(Error::InvalidFee);
@@ -471,6 +479,24 @@ impl SoroCron {
         storage::set_config(&env, &config);
         events::MinStakeSet { min_stake }.publish(&env);
         Ok(())
+    }
+
+    /// Sets the minimum `interval` new jobs may schedule. `0` disables the check.
+    pub fn set_min_interval(env: Env, min_interval: u64) {
+        let mut config = storage::load_config(&env);
+        config.admin.require_auth();
+        config.min_interval = min_interval;
+        storage::set_config(&env, &config);
+        events::MinIntervalSet { min_interval }.publish(&env);
+    }
+
+    /// Sets the maximum length of a job's `args` vector. `0` disables the check.
+    pub fn set_max_args(env: Env, max_args: u32) {
+        let mut config = storage::load_config(&env);
+        config.admin.require_auth();
+        config.max_args = max_args;
+        storage::set_config(&env, &config);
+        events::MaxArgsSet { max_args }.publish(&env);
     }
 
     // ------------------------------------------------------------------

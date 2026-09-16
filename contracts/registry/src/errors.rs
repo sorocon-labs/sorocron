@@ -26,4 +26,6 @@ pub enum Error {
     NoPendingAdmin = 18,
     JobPaused = 19,
     JobExpired = 20,
+    IntervalTooShort = 21,
+    TooManyArgs = 22,
 }
