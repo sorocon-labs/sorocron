@@ -2,4 +2,4 @@
 target
 keeper-bot/node_modules
 keeper-bot/dist
-keeper-bot/.env
+keeper-bot/.env  # environment variables
