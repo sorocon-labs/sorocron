@@ -1,6 +1,6 @@
 {
   "name": "sorocron-keeper-bot",
-  "version": "0.1.0",
+  "version": "0.1.0",  // matches workspace version
   "description": "Reference SoroCron keeper node plus testnet deploy and demo scripts",
   "license": "MIT",
   "private": true,
