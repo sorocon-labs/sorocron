@@ -4,7 +4,7 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short,
     testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
-    vec, Address, Env, Event as _, IntoVal, Symbol, Val, Vec,
+    vec, xdr::ToXdr, Address, Env, Event as _, IntoVal, Symbol, Val, Vec,
 };
 use sorocron_executor::Executor;
 use sorocron_ttl_guardian::TtlGuardian;
@@ -1098,12 +1098,21 @@ fn job_executed_event() {
     let id = s.cron.create_job(&s.owner, &params(&s), &100);
     s.cron.execute(&s.keeper, &id);
 
+    // MockTarget::bump(1) on a fresh counter returns 1.
+    let expected_result: Val = 1u32.into_val(&s.env);
+    let result_hash = s
+        .env
+        .crypto()
+        .sha256(&expected_result.to_xdr(&s.env))
+        .to_bytes();
+
     let expected = events::JobExecuted {
         job_id: id,
         keeper: s.keeper.clone(),
         fee: FEE,
         run: 1,
         next_run: START + INTERVAL,
+        result_hash,
     }
     .to_xdr(&s.env, &s.cron.address);
     assert_eq!(last_event(&s), expected);

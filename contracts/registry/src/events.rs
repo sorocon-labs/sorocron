@@ -1,7 +1,7 @@
 //! Events emitted by the registry. Indexers and keeper bots rely on these,
 //! so treat field changes as breaking.
 
-use soroban_sdk::{contractevent, Address};
+use soroban_sdk::{contractevent, Address, BytesN};
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,6 +35,9 @@ pub struct JobExecuted {
     pub fee: i128,
     pub run: u32,
     pub next_run: u64,
+    /// sha256 of the XDR-serialized return value of the target call.
+    /// Lets indexers verify a run's outcome without re-simulating it.
+    pub result_hash: BytesN<32>,
 }
 
 #[contractevent]

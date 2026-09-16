@@ -24,7 +24,8 @@ pub use types::{Config, Job, JobParams, Keeper};
 
 use executor::ExecutorClient;
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol, Vec,
+    contract, contractimpl, panic_with_error, token, vec, xdr::ToXdr, Address, Env, IntoVal,
+    Symbol, Vec,
 };
 
 /// Function a resolver contract must expose: `should_run(job_id: u64) -> bool`.
@@ -237,7 +238,9 @@ impl SoroCron {
         storage::set_keeper(&env, &keeper, &keeper_info);
 
         // Interactions.
-        ExecutorClient::new(&env, &executor).execute(&job.target, &job.function, &job.args);
+        let result =
+            ExecutorClient::new(&env, &executor).execute(&job.target, &job.function, &job.args);
+        let result_hash = env.crypto().sha256(&result.to_xdr(&env)).to_bytes();
         token::TokenClient::new(&env, &config.fee_token).transfer(
             &env.current_contract_address(),
             &keeper,
@@ -250,6 +253,7 @@ impl SoroCron {
             fee: job.fee_per_run,
             run: job.runs,
             next_run: job.next_run,
+            result_hash,
         }
         .publish(&env);
         Ok(())
