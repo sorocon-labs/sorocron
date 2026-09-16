@@ -12,6 +12,7 @@
  */
 import { warnIfBalanceLow } from "./balance.js";
 import { clientFor, ensureFunded, keypairFromEnv, registryId, server } from "./config.js";
+import { describeMissingContractError } from "./contractErrors.js";
 import { tick, type RegistryLike } from "./tick.js";
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 10_000);
@@ -28,10 +29,20 @@ async function main() {
   await ensureFunded(keypair);
 
   const contractId = registryId();
-  const registry = await clientFor(contractId, keypair);
-
-  const info = (await registry.get_keeper({ keeper })).result;
-  const { min_stake } = (await registry.config()).result;
+  let registry: Awaited<ReturnType<typeof clientFor>>;
+  let info: { unbonding_at?: bigint | null; stake: bigint } | null | undefined;
+  let min_stake: bigint;
+  try {
+    registry = await clientFor(contractId, keypair);
+    ({ result: info } = await registry.get_keeper({ keeper }));
+    ({
+      result: { min_stake },
+    } = await registry.config());
+  } catch (err) {
+    const friendly = describeMissingContractError(err, contractId);
+    if (friendly) throw new Error(friendly);
+    throw err;
+  }
   if (!info) {
     throw new Error(`${keeper} is not a registered keeper. Stake first (see \`npm run demo\`).`);
   }
