@@ -1,10 +1,10 @@
-use crate::{Error, JobParams, SoroCron, SoroCronClient};
+use crate::{events, Error, JobParams, SoroCron, SoroCronClient};
 use soroban_sdk::testutils::Deployer as _;
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
-    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
-    vec, Address, Env, IntoVal, Symbol, Val, Vec,
+    vec, Address, Env, Event as _, IntoVal, Symbol, Val, Vec,
 };
 use sorocron_executor::Executor;
 use sorocron_ttl_guardian::TtlGuardian;
@@ -850,4 +850,149 @@ fn pausing_missing_job_fails() {
         s.cron.try_set_job_active(&7, &false),
         Err(Ok(Error::JobNotFound))
     );
+}
+
+// ---------------------------------------------------------------------------
+// Events (#14: every state change is checked against the event it emits)
+// ---------------------------------------------------------------------------
+
+/// Last event the registry emitted, as XDR, for comparison with `Event::to_xdr`.
+fn last_event(s: &Setup) -> soroban_sdk::xdr::ContractEvent {
+    s.env
+        .events()
+        .all()
+        .filter_by_contract(&s.cron.address)
+        .events()
+        .last()
+        .cloned()
+        .expect("no event was emitted")
+}
+
+#[test]
+fn job_created_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let expected = events::JobCreated {
+        job_id: id,
+        owner: s.owner.clone(),
+        target: s.target.address.clone(),
+        interval: INTERVAL,
+        fee_per_run: FEE,
+        deposit: 100,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn job_funded_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.fund_job(&s.owner, &id, &50);
+
+    let expected = events::JobFunded {
+        job_id: id,
+        from: s.owner.clone(),
+        amount: 50,
+        balance: 150,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn job_executed_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.execute(&s.keeper, &id);
+
+    let expected = events::JobExecuted {
+        job_id: id,
+        keeper: s.keeper.clone(),
+        fee: FEE,
+        run: 1,
+        next_run: START + INTERVAL,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn job_cancelled_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.cancel_job(&id);
+
+    let expected = events::JobCancelled {
+        job_id: id,
+        refund: 100,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn keeper_staked_event() {
+    let s = setup();
+    let newcomer = Address::generate(&s.env);
+    s.sac.mint(&newcomer, &MIN_STAKE);
+    s.cron.stake(&newcomer, &MIN_STAKE);
+
+    let expected = events::KeeperStaked {
+        keeper: newcomer,
+        amount: MIN_STAKE,
+        total: MIN_STAKE,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn keeper_unbonding_event() {
+    let s = setup();
+    let withdrawable_at = s.cron.begin_unbonding(&s.keeper);
+
+    let expected = events::KeeperUnbonding {
+        keeper: s.keeper.clone(),
+        withdrawable_at,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn keeper_withdrawn_event() {
+    let s = setup();
+    s.cron.begin_unbonding(&s.keeper);
+    advance(&s.env, UNBONDING);
+    s.cron.withdraw_stake(&s.keeper);
+
+    let expected = events::KeeperWithdrawn {
+        keeper: s.keeper.clone(),
+        amount: MIN_STAKE,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn paused_set_event() {
+    let s = setup();
+    s.cron.set_paused(&true);
+
+    let expected = events::PausedSet { paused: true }.to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn min_stake_set_event() {
+    let s = setup();
+    s.cron.set_min_stake(&(MIN_STAKE + 1));
+
+    let expected = events::MinStakeSet {
+        min_stake: MIN_STAKE + 1,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
 }
