@@ -844,6 +844,62 @@ fn only_owner_can_pause_a_job() {
 }
 
 #[test]
+fn only_admin_can_pause() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_paused",
+            args: (true,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_paused(&true).is_err());
+    assert!(!s.cron.config().paused);
+}
+
+#[test]
+fn only_admin_can_change_min_stake() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+    let new_min = MIN_STAKE + 1;
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_min_stake",
+            args: (new_min,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_min_stake(&new_min).is_err());
+    assert_eq!(s.cron.config().min_stake, MIN_STAKE);
+}
+
+#[test]
+fn only_owner_can_cancel_job() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "cancel_job",
+            args: (id,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_cancel_job(&id).is_err());
+    assert!(s.cron.get_job(&id).is_some());
+}
+
+#[test]
 fn pausing_missing_job_fails() {
     let s = setup();
     assert_eq!(
