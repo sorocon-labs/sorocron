@@ -104,6 +104,14 @@ npm run demo
 npm run keeper
 ```
 
+To run just the keeper node in Docker instead: copy `keeper-bot/.env.example` to
+`keeper-bot/.env`, fill it in (`npm run deploy:testnet` above can generate the key), then
+from the repository root:
+
+```bash
+docker compose -f keeper-bot/docker-compose.yml up --build
+```
+
 No Stellar CLI is needed; the scripts use `@stellar/stellar-sdk`. With the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) you can call the registry directly:
 
 ```bash
