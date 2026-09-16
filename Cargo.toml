@@ -6,6 +6,10 @@ members = [
     "contracts/ttl-guardian",
     "contracts/examples/counter",
     "contracts/examples/flag-resolver",
+    "contracts/examples/dca",
+    "contracts/examples/vesting",
+    "contracts/examples/subscription",
+    "contracts/examples/oracle-trigger",
 ]
 
 [workspace.package]
