@@ -248,10 +248,7 @@ mod test {
         // Deposit funds into DCA contract
         client.deposit(&owner, &500);
         let token_client = token::Client::new(&env, &sell_token);
-        assert_eq!(
-            token_client.balance(&client.address),
-            500
-        );
+        assert_eq!(token_client.balance(&client.address), 500);
     }
 
     #[test]

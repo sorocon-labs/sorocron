@@ -8,8 +8,7 @@
 //! Implements `should_run_for` as a SoroCron resolver.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
-    Symbol,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
 };
 
 const MERCHANT: Symbol = symbol_short!("MERCH");
@@ -69,7 +68,11 @@ impl SubscriptionContract {
 
         let token_addr: Address = env.storage().instance().get(&TOKEN).expect("token not set");
         let token_client = token::Client::new(&env, &token_addr);
-        token_client.transfer(&subscriber, &env.current_contract_address(), &initial_deposit);
+        token_client.transfer(
+            &subscriber,
+            &env.current_contract_address(),
+            &initial_deposit,
+        );
 
         let key = (SUB, subscriber.clone());
         let sub = Subscription {
@@ -83,7 +86,9 @@ impl SubscriptionContract {
         };
 
         env.storage().persistent().set(&key, &sub);
-        env.storage().persistent().extend_ttl(&key, 100_000, 500_000);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 500_000);
     }
 
     /// Tops up prepaid subscription balance.
@@ -105,7 +110,9 @@ impl SubscriptionContract {
             .expect("subscription not found");
         sub.prepaid_balance += amount;
         env.storage().persistent().set(&key, &sub);
-        env.storage().persistent().extend_ttl(&key, 100_000, 500_000);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 500_000);
     }
 
     /// Charges the subscriber if due. Permissionless: can be called by SoroCron keeper.
@@ -146,7 +153,9 @@ impl SubscriptionContract {
         sub.total_payments += 1;
 
         env.storage().persistent().set(&key, &sub);
-        env.storage().persistent().extend_ttl(&key, 100_000, 500_000);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 500_000);
 
         sub.total_payments
     }
@@ -186,7 +195,9 @@ impl SubscriptionContract {
         sub.prepaid_balance = 0;
 
         env.storage().persistent().set(&key, &sub);
-        env.storage().persistent().extend_ttl(&key, 100_000, 500_000);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 500_000);
 
         if refund > 0 {
             let token_addr: Address = env.storage().instance().get(&TOKEN).expect("token not set");

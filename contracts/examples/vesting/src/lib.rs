@@ -8,8 +8,7 @@
 //! Implements `should_run(job_id: u64) -> bool` as a SoroCron resolver.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
-    Symbol,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
 };
 
 const ADMIN: Symbol = symbol_short!("ADMIN");
@@ -64,7 +63,11 @@ impl VestingContract {
         total_duration: u64,
         revocable: bool,
     ) {
-        let admin: Address = env.storage().instance().get(&ADMIN).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN)
+            .expect("not initialized");
         admin.require_auth();
 
         if total_amount <= 0 || total_duration == 0 || cliff_duration > total_duration {
@@ -92,7 +95,9 @@ impl VestingContract {
         };
 
         env.storage().persistent().set(&key, &schedule);
-        env.storage().persistent().extend_ttl(&key, 100_000, 500_000);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 500_000);
     }
 
     /// Computes the total vested amount up to current ledger timestamp.
@@ -150,7 +155,9 @@ impl VestingContract {
 
         schedule.released_amount += releasable;
         env.storage().persistent().set(&key, &schedule);
-        env.storage().persistent().extend_ttl(&key, 100_000, 500_000);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 500_000);
 
         let token_addr: Address = env.storage().instance().get(&TOKEN).expect("token not set");
         let token_client = token::Client::new(&env, &token_addr);
@@ -212,14 +219,7 @@ mod test {
         let (env, _admin, beneficiary, token_addr, client) = setup_vesting();
 
         // 1000 tokens total: 100s start, 200s cliff, 1000s total duration
-        client.create_schedule(
-            &beneficiary,
-            &1000,
-            &100,
-            &200,
-            &1000,
-            &true,
-        );
+        client.create_schedule(&beneficiary, &1000, &100, &200, &1000, &true);
 
         // Before start
         env.ledger().set_timestamp(50);

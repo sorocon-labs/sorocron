@@ -36,12 +36,7 @@ pub struct OracleTriggerResolver;
 #[contractimpl]
 impl OracleTriggerResolver {
     /// Initializes the trigger resolver with admin authority and initial threshold.
-    pub fn __constructor(
-        env: Env,
-        admin: Address,
-        threshold_price: i128,
-        trigger_below: bool,
-    ) {
+    pub fn __constructor(env: Env, admin: Address, threshold_price: i128, trigger_below: bool) {
         if threshold_price <= 0 {
             panic!("threshold price must be positive");
         }
@@ -136,8 +131,7 @@ mod test {
         let admin = Address::generate(&env);
 
         // Trigger when price <= 100 (e.g. liquidation condition)
-        let contract_id =
-            env.register(OracleTriggerResolver, (admin.clone(), 100i128, true));
+        let contract_id = env.register(OracleTriggerResolver, (admin.clone(), 100i128, true));
         let client = OracleTriggerResolverClient::new(&env, &contract_id);
 
         // At 100, trigger_below is satisfied
@@ -159,8 +153,7 @@ mod test {
         let admin = Address::generate(&env);
 
         // Trigger when price >= 200 (e.g. take-profit or rebalance)
-        let contract_id =
-            env.register(OracleTriggerResolver, (admin.clone(), 200i128, false));
+        let contract_id = env.register(OracleTriggerResolver, (admin.clone(), 200i128, false));
         let client = OracleTriggerResolverClient::new(&env, &contract_id);
 
         client.update_price(&180);
