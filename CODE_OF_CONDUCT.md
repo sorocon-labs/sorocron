@@ -4,7 +4,7 @@ SoroCron is built by contributors from many backgrounds and experience levels. W
 
 ## Expected behaviour
 
-- Be respectful and assume good faith.
+- Be respectful and assume good faith..
 - Review code, not people. Explain the *why* behind change requests.
 - Be patient with newcomers; everyone's first Soroban PR is hard.
 - Credit others' work and ideas.
