@@ -1,10 +1,12 @@
-use crate::{Error, JobParams, SoroCron, SoroCronClient};
+use crate::{events, Error, JobParams, SoroCron, SoroCronClient};
 use soroban_sdk::testutils::Deployer as _;
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
-    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
-    vec, Address, Env, IntoVal, Symbol, Val, Vec,
+    vec,
+    xdr::ToXdr,
+    Address, Env, Event as _, IntoVal, Symbol, Val, Vec,
 };
 use sorocron_executor::Executor;
 use sorocron_ttl_guardian::TtlGuardian;
@@ -134,6 +136,7 @@ fn params(s: &Setup) -> JobParams {
         start_at: 0,
         fee_per_run: FEE,
         max_runs: 0,
+        end_at: 0,
         resolver: None,
     }
 }
@@ -360,6 +363,49 @@ fn execute_stops_at_max_runs() {
 }
 
 #[test]
+fn execute_succeeds_before_end_at() {
+    let s = setup();
+    let mut p = params(&s);
+    p.end_at = START + INTERVAL + 1;
+    let id = s.cron.create_job(&s.owner, &p, &1_000);
+
+    advance(&s.env, INTERVAL);
+    assert!(s.cron.is_due(&id));
+    s.cron.execute(&s.keeper, &id);
+    assert_eq!(s.target.count(), 1);
+}
+
+#[test]
+fn execute_rejects_at_end_at() {
+    let s = setup();
+    let mut p = params(&s);
+    p.end_at = START + INTERVAL;
+    let id = s.cron.create_job(&s.owner, &p, &1_000);
+
+    advance(&s.env, INTERVAL);
+    assert!(!s.cron.is_due(&id));
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &id),
+        Err(Ok(Error::JobExpired))
+    );
+}
+
+#[test]
+fn execute_rejects_after_end_at() {
+    let s = setup();
+    let mut p = params(&s);
+    p.end_at = START + INTERVAL;
+    let id = s.cron.create_job(&s.owner, &p, &1_000);
+
+    advance(&s.env, INTERVAL * 2);
+    assert!(!s.cron.is_due(&id));
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &id),
+        Err(Ok(Error::JobExpired))
+    );
+}
+
+#[test]
 fn execute_stops_when_balance_runs_out_and_resumes_after_funding() {
     let s = setup();
     let id = s.cron.create_job(&s.owner, &params(&s), &FEE);
@@ -479,6 +525,223 @@ fn cancel_job_refunds_owner_and_removes_job() {
     assert_eq!(s.token.balance(&s.owner), INITIAL_BALANCE - FEE);
     assert!(s.cron.get_job(&id).is_none());
     assert_eq!(s.cron.try_cancel_job(&id), Err(Ok(Error::JobNotFound)));
+}
+
+#[test]
+fn jobs_by_owner_tracks_creation_and_cancellation() {
+    let s = setup();
+    assert_eq!(s.cron.jobs_by_owner(&s.owner), Vec::new(&s.env));
+
+    let first = s.cron.create_job(&s.owner, &params(&s), &100);
+    let second = s.cron.create_job(&s.owner, &params(&s), &100);
+    assert_eq!(s.cron.jobs_by_owner(&s.owner), vec![&s.env, first, second]);
+
+    s.cron.cancel_job(&first);
+    assert_eq!(s.cron.jobs_by_owner(&s.owner), vec![&s.env, second]);
+}
+
+/// Whether the registry emitted an event matching `expected` at any point
+/// during this test (unlike `last_event`, does not require it to be last).
+fn emitted(s: &Setup, expected: &soroban_sdk::xdr::ContractEvent) -> bool {
+    s.env
+        .events()
+        .all()
+        .filter_by_contract(&s.cron.address)
+        .events()
+        .contains(expected)
+}
+
+#[test]
+fn job_exhausted_event_fires_exactly_when_balance_drops_below_one_fee() {
+    let s = setup();
+    // Deposit covers exactly two runs; after the second, balance (0) < FEE.
+    let id = s.cron.create_job(&s.owner, &params(&s), &(FEE * 2));
+
+    s.cron.execute(&s.keeper, &id);
+    let not_yet = events::JobExhausted {
+        job_id: id,
+        balance: FEE,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert!(!emitted(&s, &not_yet));
+
+    advance(&s.env, INTERVAL);
+    s.env.mock_auths(&[MockAuth {
+        address: &s.keeper,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "execute",
+            args: (s.keeper.clone(), id).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    s.cron.execute(&s.keeper, &id);
+    let expected = events::JobExhausted {
+        job_id: id,
+        balance: 0,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert!(emitted(&s, &expected));
+}
+
+#[test]
+fn get_jobs_returns_empty_range() {
+    let s = setup();
+    s.cron.create_job(&s.owner, &params(&s), &100);
+    assert_eq!(s.cron.get_jobs(&5, &10), Vec::new(&s.env));
+    assert_eq!(s.cron.get_jobs(&0, &0), Vec::new(&s.env));
+}
+
+#[test]
+fn get_jobs_skips_cancelled_ids() {
+    let s = setup();
+    let first = s.cron.create_job(&s.owner, &params(&s), &100);
+    let second = s.cron.create_job(&s.owner, &params(&s), &100);
+    let third = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.cancel_job(&second);
+
+    let jobs = s.cron.get_jobs(&0, &10);
+    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs.get(0).unwrap().id, first);
+    assert_eq!(jobs.get(1).unwrap().id, third);
+}
+
+#[test]
+fn get_jobs_caps_limit() {
+    let s = setup();
+    for _ in 0..(crate::MAX_GET_JOBS_LIMIT + 5) {
+        s.cron.create_job(&s.owner, &params(&s), &100);
+    }
+    assert_eq!(s.cron.get_jobs(&0, &1_000).len(), crate::MAX_GET_JOBS_LIMIT);
+}
+
+#[test]
+fn withdraw_job_balance_partial() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let remaining = s.cron.withdraw_job_balance(&id, &40);
+    assert_eq!(remaining, 60);
+    assert_eq!(s.cron.get_job(&id).unwrap().balance, 60);
+    assert_eq!(s.token.balance(&s.owner), INITIAL_BALANCE - 100 + 40);
+}
+
+#[test]
+fn withdraw_job_balance_rejects_over_withdrawal() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    assert_eq!(
+        s.cron.try_withdraw_job_balance(&id, &101),
+        Err(Ok(Error::InvalidAmount))
+    );
+    assert_eq!(
+        s.cron.try_withdraw_job_balance(&id, &0),
+        Err(Ok(Error::InvalidAmount))
+    );
+}
+
+#[test]
+fn withdraw_job_balance_works_while_paused() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    s.cron.set_paused(&true);
+    assert_eq!(s.cron.withdraw_job_balance(&id, &40), 60);
+}
+
+#[test]
+fn only_owner_can_withdraw_job_balance() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "withdraw_job_balance",
+            args: (id, 40i128).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_withdraw_job_balance(&id, &40).is_err());
+    assert_eq!(s.cron.get_job(&id).unwrap().balance, 100);
+}
+
+#[test]
+fn min_interval_boundary() {
+    let s = setup();
+    s.cron.set_min_interval(&INTERVAL);
+
+    let mut too_short = params(&s);
+    too_short.interval = INTERVAL - 1;
+    assert_eq!(
+        s.cron.try_create_job(&s.owner, &too_short, &100),
+        Err(Ok(Error::IntervalTooShort))
+    );
+
+    let mut at_min = params(&s);
+    at_min.interval = INTERVAL;
+    assert!(s.cron.try_create_job(&s.owner, &at_min, &100).is_ok());
+}
+
+#[test]
+fn max_args_boundary() {
+    let s = setup();
+    s.cron.set_max_args(&2);
+
+    let mut too_many = params(&s);
+    too_many.args = vec![
+        &s.env,
+        1u32.into_val(&s.env),
+        2u32.into_val(&s.env),
+        3u32.into_val(&s.env),
+    ];
+    assert_eq!(
+        s.cron.try_create_job(&s.owner, &too_many, &100),
+        Err(Ok(Error::TooManyArgs))
+    );
+
+    let mut at_max = params(&s);
+    at_max.args = vec![&s.env, 1u32.into_val(&s.env), 2u32.into_val(&s.env)];
+    assert!(s.cron.try_create_job(&s.owner, &at_max, &100).is_ok());
+}
+
+#[test]
+fn min_interval_and_max_args_disabled_by_default() {
+    let s = setup();
+    let config = s.cron.config();
+    assert_eq!(config.min_interval, 0);
+    assert_eq!(config.max_args, 0);
+}
+
+#[test]
+fn only_admin_sets_min_interval_and_max_args() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_min_interval",
+            args: (5u64,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_min_interval(&5).is_err());
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_max_args",
+            args: (5u32,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_max_args(&5).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +939,49 @@ fn accept_admin_without_proposal_fails() {
 }
 
 #[test]
+fn cancel_admin_proposal_clears_pending_and_blocks_accept() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+
+    s.cron.propose_admin(&new_admin);
+    assert_eq!(s.cron.pending_admin(), Some(new_admin.clone()));
+
+    s.cron.cancel_admin_proposal();
+    assert_eq!(s.cron.pending_admin(), None);
+    assert_eq!(s.cron.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+    assert_eq!(s.cron.config().admin, s.admin);
+}
+
+#[test]
+fn cancel_admin_proposal_requires_no_pending_proposal() {
+    let s = setup();
+    assert_eq!(
+        s.cron.try_cancel_admin_proposal(),
+        Err(Ok(Error::NoPendingAdmin))
+    );
+}
+
+#[test]
+fn only_admin_can_cancel_admin_proposal() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+    let stranger = Address::generate(&s.env);
+    s.cron.propose_admin(&new_admin);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "cancel_admin_proposal",
+            args: ().into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_cancel_admin_proposal().is_err());
+    assert_eq!(s.cron.pending_admin(), Some(new_admin));
+}
+
+#[test]
 fn new_admin_proposal_replaces_pending_one() {
     let s = setup();
     let first = Address::generate(&s.env);
@@ -844,10 +1150,220 @@ fn only_owner_can_pause_a_job() {
 }
 
 #[test]
+fn only_admin_can_pause() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_paused",
+            args: (true,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_paused(&true).is_err());
+    assert!(!s.cron.config().paused);
+}
+
+#[test]
+fn only_admin_can_change_min_stake() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+    let new_min = MIN_STAKE + 1;
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "set_min_stake",
+            args: (new_min,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_set_min_stake(&new_min).is_err());
+    assert_eq!(s.cron.config().min_stake, MIN_STAKE);
+}
+
+#[test]
+fn only_owner_can_cancel_job() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "cancel_job",
+            args: (id,).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_cancel_job(&id).is_err());
+    assert!(s.cron.get_job(&id).is_some());
+}
+
+#[test]
 fn pausing_missing_job_fails() {
     let s = setup();
     assert_eq!(
         s.cron.try_set_job_active(&7, &false),
         Err(Ok(Error::JobNotFound))
     );
+}
+
+// ---------------------------------------------------------------------------
+// Events (#14: every state change is checked against the event it emits)
+// ---------------------------------------------------------------------------
+
+/// Last event the registry emitted, as XDR, for comparison with `Event::to_xdr`.
+fn last_event(s: &Setup) -> soroban_sdk::xdr::ContractEvent {
+    s.env
+        .events()
+        .all()
+        .filter_by_contract(&s.cron.address)
+        .events()
+        .last()
+        .cloned()
+        .expect("no event was emitted")
+}
+
+#[test]
+fn job_created_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let expected = events::JobCreated {
+        job_id: id,
+        owner: s.owner.clone(),
+        target: s.target.address.clone(),
+        interval: INTERVAL,
+        fee_per_run: FEE,
+        deposit: 100,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn job_funded_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.fund_job(&s.owner, &id, &50);
+
+    let expected = events::JobFunded {
+        job_id: id,
+        from: s.owner.clone(),
+        amount: 50,
+        balance: 150,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn job_executed_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.execute(&s.keeper, &id);
+
+    // MockTarget::bump(1) on a fresh counter returns 1.
+    let expected_result: Val = 1u32.into_val(&s.env);
+    let result_hash = s
+        .env
+        .crypto()
+        .sha256(&expected_result.to_xdr(&s.env))
+        .to_bytes();
+
+    let expected = events::JobExecuted {
+        job_id: id,
+        keeper: s.keeper.clone(),
+        fee: FEE,
+        run: 1,
+        next_run: START + INTERVAL,
+        result_hash,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn job_cancelled_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.cancel_job(&id);
+
+    let expected = events::JobCancelled {
+        job_id: id,
+        refund: 100,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn keeper_staked_event() {
+    let s = setup();
+    let newcomer = Address::generate(&s.env);
+    s.sac.mint(&newcomer, &MIN_STAKE);
+    s.cron.stake(&newcomer, &MIN_STAKE);
+
+    let expected = events::KeeperStaked {
+        keeper: newcomer,
+        amount: MIN_STAKE,
+        total: MIN_STAKE,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn keeper_unbonding_event() {
+    let s = setup();
+    let withdrawable_at = s.cron.begin_unbonding(&s.keeper);
+
+    let expected = events::KeeperUnbonding {
+        keeper: s.keeper.clone(),
+        withdrawable_at,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn keeper_withdrawn_event() {
+    let s = setup();
+    s.cron.begin_unbonding(&s.keeper);
+    advance(&s.env, UNBONDING);
+    s.cron.withdraw_stake(&s.keeper);
+
+    let expected = events::KeeperWithdrawn {
+        keeper: s.keeper.clone(),
+        amount: MIN_STAKE,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn paused_set_event() {
+    let s = setup();
+    s.cron.set_paused(&true);
+
+    let expected = events::PausedSet { paused: true }.to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
+}
+
+#[test]
+fn min_stake_set_event() {
+    let s = setup();
+    s.cron.set_min_stake(&(MIN_STAKE + 1));
+
+    let expected = events::MinStakeSet {
+        min_stake: MIN_STAKE + 1,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert_eq!(last_event(&s), expected);
 }

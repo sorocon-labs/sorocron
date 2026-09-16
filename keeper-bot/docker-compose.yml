@@ -1,0 +1,8 @@
+services:
+  keeper:
+    build:
+      context: ..
+      dockerfile: keeper-bot/Dockerfile
+    env_file:
+      - .env
+    restart: unless-stopped

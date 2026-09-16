@@ -1,7 +1,7 @@
 //! Events emitted by the registry. Indexers and keeper bots rely on these,
 //! so treat field changes as breaking.
 
-use soroban_sdk::{contractevent, Address};
+use soroban_sdk::{contractevent, Address, BytesN};
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,6 +35,17 @@ pub struct JobExecuted {
     pub fee: i128,
     pub run: u32,
     pub next_run: u64,
+    /// sha256 of the XDR-serialized return value of the target call.
+    /// Lets indexers verify a run's outcome without re-simulating it.
+    pub result_hash: BytesN<32>,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobExhausted {
+    #[topic]
+    pub job_id: u64,
+    pub balance: i128,
 }
 
 #[contractevent]
@@ -43,6 +54,15 @@ pub struct JobCancelled {
     #[topic]
     pub job_id: u64,
     pub refund: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobWithdrawn {
+    #[topic]
+    pub job_id: u64,
+    pub amount: i128,
+    pub balance: i128,
 }
 
 #[contractevent]
@@ -87,6 +107,13 @@ pub struct AdminProposed {
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposalCancelled {
+    pub current: Address,
+    pub cancelled: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdminChanged {
     pub previous: Address,
     pub new_admin: Address,
@@ -108,4 +135,16 @@ pub struct PausedSet {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MinStakeSet {
     pub min_stake: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinIntervalSet {
+    pub min_interval: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MaxArgsSet {
+    pub max_args: u32,
 }

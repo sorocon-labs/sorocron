@@ -37,10 +37,10 @@ sequenceDiagram
 
 | Key | Storage | Contents |
 |---|---|---|
-| `Config` | instance | admin, fee token, stake token, min stake, unbonding period, paused flag, executor |
+| `Config` | instance | admin, fee token, stake token, min stake, unbonding period, paused flag, executor, min interval, max args |
 | `NextJobId` | instance | monotonically increasing job id counter |
 | `PendingAdmin` | instance | admin proposed via `propose_admin`, until accepted |
-| `Job(u64)` | persistent | owner, target, function, args, interval, next_run, fee_per_run, balance, max_runs, runs, resolver, active |
+| `Job(u64)` | persistent | owner, target, function, args, interval, next_run, fee_per_run, balance, max_runs, runs, end_at, resolver, active |
 | `Keeper(Address)` | persistent | stake, unbonding_at, executions |
 
 Every read and write of a persistent entry extends its TTL (30 days), so active jobs and keepers never get archived. The instance is extended to 7 days on every call.
@@ -48,8 +48,9 @@ Every read and write of a persistent entry extends its TTL (30 days), so active 
 ## Scheduling
 
 - `next_run` starts at `max(start_at, now)`.
-- A job is **due** when `now >= next_run`, its balance covers one fee, `max_runs` isn't reached, and its resolver (if any) returns `true`.
+- A job is **due** when `now >= next_run`, its balance covers one fee, `max_runs` isn't reached, `end_at` (if set) hasn't passed, and its resolver (if any) returns `true`.
 - After a run, `next_run = next_run + interval`. If keepers were offline long enough that this is already in the past, it becomes `now + interval` instead, so missed runs don't fire back-to-back.
+- `end_at` is an optional Unix timestamp (`0` means never) after which the job stops being due, even if it hasn't hit `max_runs` and its balance is still funded. Unlike `max_runs`, it expires by wall-clock time rather than by run count &mdash; useful for jobs tied to a calendar date, like a campaign that ends on a given day. Once `now >= end_at`, `execute` fails with `JobExpired`; the job can still be cancelled or have its balance withdrawn.
 
 Time is measured with the ledger timestamp (seconds). Ledgers close about every 5 seconds, so that is the practical minimum resolution.
 
@@ -113,3 +114,6 @@ The test `guardian_job_keeps_target_contract_from_being_archived` runs this end 
 | 17 | `ExecutorAlreadySet` | The executor can only be set once |
 | 18 | `NoPendingAdmin` | `accept_admin` called with no proposal outstanding |
 | 19 | `JobPaused` | The owner paused this job with `set_job_active` |
+| 20 | `JobExpired` | `now >= end_at` |
+| 21 | `IntervalTooShort` | `interval` below the admin-configured `min_interval` |
+| 22 | `TooManyArgs` | `args` longer than the admin-configured `max_args` |

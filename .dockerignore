@@ -1,0 +1,5 @@
+.git
+target
+keeper-bot/node_modules
+keeper-bot/dist
+keeper-bot/.env

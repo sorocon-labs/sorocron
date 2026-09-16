@@ -14,6 +14,10 @@ pub struct Config {
     pub paused: bool,
     /// Contract that performs target calls. Set once via `set_executor`.
     pub executor: Option<Address>,
+    /// Minimum `interval` a job may schedule, in seconds. `0` means no minimum.
+    pub min_interval: u64,
+    /// Maximum length of a job's `args` vector. `0` means no maximum.
+    pub max_args: u32,
 }
 
 /// Input to `create_job`.
@@ -34,6 +38,8 @@ pub struct JobParams {
     pub fee_per_run: i128,
     /// Maximum number of runs. `0` means unlimited.
     pub max_runs: u32,
+    /// Unix timestamp after which the job can no longer run. `0` means never.
+    pub end_at: u64,
     /// Optional contract exposing `should_run(job_id: u64) -> bool`.
     pub resolver: Option<Address>,
 }
@@ -54,6 +60,8 @@ pub struct Job {
     pub balance: i128,
     pub max_runs: u32,
     pub runs: u32,
+    /// Unix timestamp after which the job can no longer run. `0` means never.
+    pub end_at: u64,
     pub resolver: Option<Address>,
     /// `false` while the owner has paused the job.
     pub active: bool,
@@ -76,4 +84,5 @@ pub enum DataKey {
     Job(u64),
     Keeper(Address),
     PendingAdmin,
+    OwnerJobs(Address),
 }

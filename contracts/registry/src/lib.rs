@@ -24,11 +24,15 @@ pub use types::{Config, Job, JobParams, Keeper};
 
 use executor::ExecutorClient;
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol,
+    contract, contractimpl, panic_with_error, token, vec, xdr::ToXdr, Address, Env, IntoVal,
+    Symbol, Vec,
 };
 
 /// Function a resolver contract must expose: `should_run(job_id: u64) -> bool`.
 pub const RESOLVER_FN: &str = "should_run";
+
+/// Hard cap on `limit` in `get_jobs`, regardless of what the caller passes.
+pub const MAX_GET_JOBS_LIMIT: u32 = 50;
 
 #[contract]
 pub struct SoroCron;
@@ -59,6 +63,8 @@ impl SoroCron {
                 unbonding_period,
                 paused: false,
                 executor: None,
+                min_interval: 0,
+                max_args: 0,
             },
         );
     }
@@ -81,6 +87,12 @@ impl SoroCron {
 
         if params.interval == 0 {
             return Err(Error::InvalidInterval);
+        }
+        if config.min_interval != 0 && params.interval < config.min_interval {
+            return Err(Error::IntervalTooShort);
+        }
+        if config.max_args != 0 && params.args.len() > config.max_args {
+            return Err(Error::TooManyArgs);
         }
         if params.fee_per_run <= 0 {
             return Err(Error::InvalidFee);
@@ -112,10 +124,12 @@ impl SoroCron {
             balance: deposit,
             max_runs: params.max_runs,
             runs: 0,
+            end_at: params.end_at,
             resolver: params.resolver,
             active: true,
         };
         storage::set_job(&env, &job);
+        storage::add_owner_job(&env, &owner, id);
 
         events::JobCreated {
             job_id: id,
@@ -166,6 +180,7 @@ impl SoroCron {
         job.owner.require_auth();
 
         storage::remove_job(&env, job_id);
+        storage::remove_owner_job(&env, &job.owner, job_id);
         if job.balance > 0 {
             token::TokenClient::new(&env, &config.fee_token).transfer(
                 &env.current_contract_address(),
@@ -177,6 +192,35 @@ impl SoroCron {
         events::JobCancelled {
             job_id,
             refund: job.balance,
+        }
+        .publish(&env);
+        Ok(job.balance)
+    }
+
+    /// Withdraws part of a job's fee balance back to the owner, without
+    /// cancelling the job. Allowed while the registry is paused (it is an
+    /// exit, like `cancel_job`).
+    pub fn withdraw_job_balance(env: Env, job_id: u64, amount: i128) -> Result<i128, Error> {
+        let config = storage::load_config(&env);
+        let mut job = storage::get_job(&env, job_id).ok_or(Error::JobNotFound)?;
+        job.owner.require_auth();
+
+        if amount <= 0 || amount > job.balance {
+            return Err(Error::InvalidAmount);
+        }
+
+        job.balance -= amount;
+        storage::set_job(&env, &job);
+        token::TokenClient::new(&env, &config.fee_token).transfer(
+            &env.current_contract_address(),
+            &job.owner,
+            &amount,
+        );
+
+        events::JobWithdrawn {
+            job_id,
+            amount,
+            balance: job.balance,
         }
         .publish(&env);
         Ok(job.balance)
@@ -220,11 +264,21 @@ impl SoroCron {
         job.next_run = next_run_after(job.next_run, job.interval, now);
         storage::set_job(&env, &job);
 
+        if job.balance < job.fee_per_run {
+            events::JobExhausted {
+                job_id,
+                balance: job.balance,
+            }
+            .publish(&env);
+        }
+
         keeper_info.executions = keeper_info.executions.saturating_add(1);
         storage::set_keeper(&env, &keeper, &keeper_info);
 
         // Interactions.
-        ExecutorClient::new(&env, &executor).execute(&job.target, &job.function, &job.args);
+        let result =
+            ExecutorClient::new(&env, &executor).execute(&job.target, &job.function, &job.args);
+        let result_hash = env.crypto().sha256(&result.to_xdr(&env)).to_bytes();
         token::TokenClient::new(&env, &config.fee_token).transfer(
             &env.current_contract_address(),
             &keeper,
@@ -237,6 +291,7 @@ impl SoroCron {
             fee: job.fee_per_run,
             run: job.runs,
             next_run: job.next_run,
+            result_hash,
         }
         .publish(&env);
         Ok(())
@@ -388,6 +443,22 @@ impl SoroCron {
         storage::get_pending_admin(&env)
     }
 
+    /// Withdraws a pending admin proposal. Current admin only.
+    pub fn cancel_admin_proposal(env: Env) -> Result<(), Error> {
+        let config = storage::load_config(&env);
+        config.admin.require_auth();
+
+        let pending = storage::get_pending_admin(&env).ok_or(Error::NoPendingAdmin)?;
+        storage::remove_pending_admin(&env);
+
+        events::AdminProposalCancelled {
+            current: config.admin,
+            cancelled: pending,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
     /// Emergency switch. While paused, no jobs run and no new funds enter;
     /// cancellations and stake withdrawals keep working.
     pub fn set_paused(env: Env, paused: bool) {
@@ -410,6 +481,24 @@ impl SoroCron {
         Ok(())
     }
 
+    /// Sets the minimum `interval` new jobs may schedule. `0` disables the check.
+    pub fn set_min_interval(env: Env, min_interval: u64) {
+        let mut config = storage::load_config(&env);
+        config.admin.require_auth();
+        config.min_interval = min_interval;
+        storage::set_config(&env, &config);
+        events::MinIntervalSet { min_interval }.publish(&env);
+    }
+
+    /// Sets the maximum length of a job's `args` vector. `0` disables the check.
+    pub fn set_max_args(env: Env, max_args: u32) {
+        let mut config = storage::load_config(&env);
+        config.admin.require_auth();
+        config.max_args = max_args;
+        storage::set_config(&env, &config);
+        events::MaxArgsSet { max_args }.publish(&env);
+    }
+
     // ------------------------------------------------------------------
     // Views
     // ------------------------------------------------------------------
@@ -424,6 +513,31 @@ impl SoroCron {
 
     pub fn get_keeper(env: Env, keeper: Address) -> Option<Keeper> {
         storage::get_keeper(&env, &keeper)
+    }
+
+    /// Jobs with ids in `[start, start + limit)`, skipping cancelled ids.
+    /// `limit` is capped at `MAX_GET_JOBS_LIMIT`.
+    pub fn get_jobs(env: Env, start: u64, limit: u32) -> Vec<Job> {
+        let limit = limit.min(MAX_GET_JOBS_LIMIT);
+        let end = start
+            .saturating_add(limit as u64)
+            .min(storage::next_job_id(&env));
+
+        let mut jobs = Vec::new(&env);
+        let mut id = start;
+        while id < end {
+            if let Some(job) = storage::get_job(&env, id) {
+                jobs.push_back(job);
+            }
+            id += 1;
+        }
+        jobs
+    }
+
+    /// Ids of jobs currently owned by `owner`, most recently created last.
+    /// Cancelled jobs are removed from this list.
+    pub fn jobs_by_owner(env: Env, owner: Address) -> Vec<u64> {
+        storage::owner_jobs(&env, &owner)
     }
 
     /// Number of job ids ever issued. Ids run from `0` to `job_count - 1`;
@@ -482,6 +596,9 @@ fn ensure_due(job: &Job, now: u64) -> Result<(), Error> {
     }
     if job.max_runs != 0 && job.runs >= job.max_runs {
         return Err(Error::MaxRunsReached);
+    }
+    if job.end_at != 0 && now >= job.end_at {
+        return Err(Error::JobExpired);
     }
     if job.balance < job.fee_per_run {
         return Err(Error::InsufficientJobBalance);

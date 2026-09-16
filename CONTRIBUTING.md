@@ -61,6 +61,20 @@ rustup component add rustfmt clippy
 node --version
 ```
 
+### 1.5 Shortcut: `just`
+
+The commands below are also available as [`just`](https://just.systems)
+recipes (`brew install just`, or see their install docs for Linux/Windows):
+
+```bash
+just build           # cargo build --release --target wasm32v1-none
+just test            # cargo test
+just lint            # cargo fmt --all --check && cargo clippy --all-targets -- -D warnings
+just deploy-testnet  # keeper-bot's deploy:testnet script
+just demo            # keeper-bot's end-to-end testnet demo
+just keeper          # run the keeper bot
+```
+
 ### 2. Contracts (Rust)
 
 ```bash

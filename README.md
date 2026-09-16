@@ -104,11 +104,21 @@ npm run demo
 npm run keeper
 ```
 
+To run just the keeper node in Docker instead: copy `keeper-bot/.env.example` to
+`keeper-bot/.env`, fill it in (`npm run deploy:testnet` above can generate the key), then
+from the repository root:
+
+```bash
+docker compose -f keeper-bot/docker-compose.yml up --build
+```
+
 No Stellar CLI is needed; the scripts use `@stellar/stellar-sdk`. With the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) you can call the registry directly:
 
 ```bash
 stellar contract invoke --id CDOAY46V2REWSINTZINUKTYELO5FYVEOCFWEKVMGH4BUJPSTRZTRGQ5W --network testnet -- job_count
 ```
+
+A `stellar contract invoke` example for every registry function is in [docs/cli.md](docs/cli.md).
 
 ## Contract API
 
@@ -119,17 +129,19 @@ stellar contract invoke --id CDOAY46V2REWSINTZINUKTYELO5FYVEOCFWEKVMGH4BUJPSTRZT
 | `create_job(owner, params, deposit) -> u64` | anyone | Register a job and escrow its fee deposit |
 | `fund_job(from, job_id, amount) -> i128` | anyone | Top up a job's balance |
 | `set_job_active(job_id, active)` | job owner | Pause or resume a job |
+| `withdraw_job_balance(job_id, amount) -> i128` | job owner | Withdraw part of a job's balance without cancelling it |
 | `cancel_job(job_id) -> i128` | job owner | Delete the job and refund the balance |
 | `execute(keeper, job_id)` | staked keeper | Run a due job and collect `fee_per_run` |
 | `stake(keeper, amount) -> i128` | anyone | Become a keeper / add stake |
 | `begin_unbonding(keeper) -> u64` | keeper | Stop executing; start the withdrawal timer |
 | `withdraw_stake(keeper) -> i128` | keeper | Withdraw stake after unbonding |
 | `set_executor(executor)` | admin, once | Connect the executor contract |
-| `propose_admin(new_admin)` / `accept_admin()` | admin / proposed admin | Two-step admin handover |
+| `propose_admin(new_admin)` / `cancel_admin_proposal()` / `accept_admin()` | admin / admin / proposed admin | Two-step admin handover |
 | `set_paused(bool)` / `set_min_stake(i128)` | admin | Emergency pause / keeper requirements |
-| `is_due`, `get_job`, `get_keeper`, `job_count`, `config`, `pending_admin` | anyone | Read-only views |
+| `set_min_interval(u64)` / `set_max_args(u32)` | admin | Minimum job interval / maximum `args` length (`0` = no limit) |
+| `is_due`, `get_job`, `get_jobs(start, limit)`, `jobs_by_owner`, `get_keeper`, `job_count`, `config`, `pending_admin` | anyone | Read-only views |
 
-`JobParams`: `target`, `function`, `args`, `interval` (seconds), `start_at` (unix time, `0` = now), `fee_per_run`, `max_runs` (`0` = unlimited), `resolver` (optional).
+`JobParams`: `target`, `function`, `args`, `interval` (seconds), `start_at` (unix time, `0` = now), `fee_per_run`, `max_runs` (`0` = unlimited), `end_at` (unix time, `0` = never), `resolver` (optional).
 
 A resolver is any contract exposing `should_run(job_id: u64) -> bool`.
 
@@ -145,6 +157,7 @@ A resolver is any contract exposing `should_run(job_id: u64) -> bool`.
 | Function | Who | Description |
 |---|---|---|
 | `extend(contract, threshold, extend_to) -> u32` | anyone | Extend `contract`'s instance and code TTL if below `threshold` |
+| `extend_many(contracts, threshold, extend_to) -> Vec<u32>` | anyone | Same, for up to 20 contracts in one call |
 
 All error codes are listed in [docs/architecture.md](docs/architecture.md#error-codes).
 
