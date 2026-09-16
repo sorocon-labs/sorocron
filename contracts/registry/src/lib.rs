@@ -225,6 +225,14 @@ impl SoroCron {
         job.next_run = next_run_after(job.next_run, job.interval, now);
         storage::set_job(&env, &job);
 
+        if job.balance < job.fee_per_run {
+            events::JobExhausted {
+                job_id,
+                balance: job.balance,
+            }
+            .publish(&env);
+        }
+
         keeper_info.executions = keeper_info.executions.saturating_add(1);
         storage::set_keeper(&env, &keeper, &keeper_info);
 

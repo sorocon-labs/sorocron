@@ -39,6 +39,14 @@ pub struct JobExecuted {
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobExhausted {
+    #[topic]
+    pub job_id: u64,
+    pub balance: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JobCancelled {
     #[topic]
     pub job_id: u64,

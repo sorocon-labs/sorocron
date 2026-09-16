@@ -497,6 +497,51 @@ fn jobs_by_owner_tracks_creation_and_cancellation() {
     assert_eq!(s.cron.jobs_by_owner(&s.owner), vec![&s.env, second]);
 }
 
+/// Whether the registry emitted an event matching `expected` at any point
+/// during this test (unlike `last_event`, does not require it to be last).
+fn emitted(s: &Setup, expected: &soroban_sdk::xdr::ContractEvent) -> bool {
+    s.env
+        .events()
+        .all()
+        .filter_by_contract(&s.cron.address)
+        .events()
+        .contains(expected)
+}
+
+#[test]
+fn job_exhausted_event_fires_exactly_when_balance_drops_below_one_fee() {
+    let s = setup();
+    // Deposit covers exactly two runs; after the second, balance (0) < FEE.
+    let id = s.cron.create_job(&s.owner, &params(&s), &(FEE * 2));
+
+    s.cron.execute(&s.keeper, &id);
+    let not_yet = events::JobExhausted {
+        job_id: id,
+        balance: FEE,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert!(!emitted(&s, &not_yet));
+
+    advance(&s.env, INTERVAL);
+    s.env
+        .mock_auths(&[MockAuth {
+            address: &s.keeper,
+            invoke: &MockAuthInvoke {
+                contract: &s.cron.address,
+                fn_name: "execute",
+                args: (s.keeper.clone(), id).into_val(&s.env),
+                sub_invokes: &[],
+            },
+        }]);
+    s.cron.execute(&s.keeper, &id);
+    let expected = events::JobExhausted {
+        job_id: id,
+        balance: 0,
+    }
+    .to_xdr(&s.env, &s.cron.address);
+    assert!(emitted(&s, &expected));
+}
+
 #[test]
 fn get_jobs_returns_empty_range() {
     let s = setup();
