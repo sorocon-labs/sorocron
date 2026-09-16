@@ -189,6 +189,35 @@ impl SoroCron {
         Ok(job.balance)
     }
 
+    /// Withdraws part of a job's fee balance back to the owner, without
+    /// cancelling the job. Allowed while the registry is paused (it is an
+    /// exit, like `cancel_job`).
+    pub fn withdraw_job_balance(env: Env, job_id: u64, amount: i128) -> Result<i128, Error> {
+        let config = storage::load_config(&env);
+        let mut job = storage::get_job(&env, job_id).ok_or(Error::JobNotFound)?;
+        job.owner.require_auth();
+
+        if amount <= 0 || amount > job.balance {
+            return Err(Error::InvalidAmount);
+        }
+
+        job.balance -= amount;
+        storage::set_job(&env, &job);
+        token::TokenClient::new(&env, &config.fee_token).transfer(
+            &env.current_contract_address(),
+            &job.owner,
+            &amount,
+        );
+
+        events::JobWithdrawn {
+            job_id,
+            amount,
+            balance: job.balance,
+        }
+        .publish(&env);
+        Ok(job.balance)
+    }
+
     /// Pauses (`active = false`) or resumes a job. A paused job keeps its
     /// balance and schedule but can't be executed; funding and cancelling
     /// still work. Owner only.

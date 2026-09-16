@@ -617,6 +617,60 @@ fn get_jobs_caps_limit() {
     assert_eq!(s.cron.get_jobs(&0, &1_000).len(), crate::MAX_GET_JOBS_LIMIT);
 }
 
+#[test]
+fn withdraw_job_balance_partial() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let remaining = s.cron.withdraw_job_balance(&id, &40);
+    assert_eq!(remaining, 60);
+    assert_eq!(s.cron.get_job(&id).unwrap().balance, 60);
+    assert_eq!(s.token.balance(&s.owner), INITIAL_BALANCE - 100 + 40);
+}
+
+#[test]
+fn withdraw_job_balance_rejects_over_withdrawal() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    assert_eq!(
+        s.cron.try_withdraw_job_balance(&id, &101),
+        Err(Ok(Error::InvalidAmount))
+    );
+    assert_eq!(
+        s.cron.try_withdraw_job_balance(&id, &0),
+        Err(Ok(Error::InvalidAmount))
+    );
+}
+
+#[test]
+fn withdraw_job_balance_works_while_paused() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    s.cron.set_paused(&true);
+    assert_eq!(s.cron.withdraw_job_balance(&id, &40), 60);
+}
+
+#[test]
+fn only_owner_can_withdraw_job_balance() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "withdraw_job_balance",
+            args: (id, 40i128).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_withdraw_job_balance(&id, &40).is_err());
+    assert_eq!(s.cron.get_job(&id).unwrap().balance, 100);
+}
+
 // ---------------------------------------------------------------------------
 // Keeper staking
 // ---------------------------------------------------------------------------
