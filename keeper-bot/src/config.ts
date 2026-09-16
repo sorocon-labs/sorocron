@@ -2,7 +2,7 @@ import "dotenv/config";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Keypair, Networks, contract, rpc } from "@stellar/stellar-sdk";
+import { Asset, Keypair, Networks, contract, rpc } from "@stellar/stellar-sdk";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -17,6 +17,9 @@ export const DEPLOYMENTS_FILE = resolve(REPO_ROOT, "deployments", `${NETWORK}.js
 export const EXPLORER = `https://stellar.expert/explorer/${NETWORK === "mainnet" ? "public" : "testnet"}`;
 
 export const server = new rpc.Server(RPC_URL);
+
+/** The native XLM SEP-41 wrapper contract id on this network. */
+export const NATIVE_TOKEN_CONTRACT_ID = Asset.native().contractId(NETWORK_PASSPHRASE);
 
 export interface Deployment {
   network: string;

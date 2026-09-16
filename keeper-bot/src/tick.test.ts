@@ -10,6 +10,8 @@ function fakeRegistry(overrides: Partial<RegistryLike>): RegistryLike {
     execute: async () => {
       throw new Error("execute should not be called");
     },
+    get_job: async () => ({ result: undefined }),
+    config: async () => ({ result: { fee_token: "NATIVE" } }),
     ...overrides,
   };
 }
@@ -99,5 +101,104 @@ describe("tick", () => {
     await tick(registry, KEEPER, log);
 
     expect(lines.some((l) => l.includes("job 1: executed"))).toBe(true);
+  });
+});
+
+describe("tick profitability check (#22)", () => {
+  it("skips a due job whose network fee would exceed fee_per_run, when paid in the native token", async () => {
+    const sent: bigint[] = [];
+    const registry = fakeRegistry({
+      job_count: async () => ({ result: 1n }),
+      is_due: async () => ({ result: true }),
+      config: async () => ({ result: { fee_token: "NATIVE" } }),
+      get_job: async () => ({ result: { fee_per_run: 100n } }),
+      execute: async ({ job_id }) => ({
+        result: undefined,
+        simulationData: { transactionData: { resourceFee: 500n } },
+        signAndSend: async () => {
+          sent.push(job_id);
+          return {};
+        },
+      }),
+    });
+    const { log, lines } = collectLogs();
+
+    await tick(registry, KEEPER, log, { nativeFeeTokenId: "NATIVE" });
+
+    expect(sent).toEqual([]);
+    expect(lines.some((l) => l.includes("job 0: skipped (unprofitable"))).toBe(true);
+  });
+
+  it("executes a due job whose fee covers the network cost plus the configured minimum profit", async () => {
+    const sent: bigint[] = [];
+    const registry = fakeRegistry({
+      job_count: async () => ({ result: 1n }),
+      is_due: async () => ({ result: true }),
+      config: async () => ({ result: { fee_token: "NATIVE" } }),
+      get_job: async () => ({ result: { fee_per_run: 1_000n } }),
+      execute: async ({ job_id }) => ({
+        result: undefined,
+        simulationData: { transactionData: { resourceFee: 200n } },
+        signAndSend: async () => {
+          sent.push(job_id);
+          return { sendTransactionResponse: { hash: "abc" } };
+        },
+      }),
+    });
+    const { log, lines } = collectLogs();
+
+    await tick(registry, KEEPER, log, { nativeFeeTokenId: "NATIVE", minProfitStroops: 500n });
+
+    expect(sent).toEqual([0n]);
+    expect(lines.some((l) => l.includes("job 0: executed"))).toBe(true);
+  });
+
+  it("does not check profitability when the job's fee token isn't the native token", async () => {
+    const sent: bigint[] = [];
+    const registry = fakeRegistry({
+      job_count: async () => ({ result: 1n }),
+      is_due: async () => ({ result: true }),
+      config: async () => ({ result: { fee_token: "SOME_OTHER_TOKEN" } }),
+      get_job: async () => {
+        throw new Error("get_job should not be called when the fee token isn't native");
+      },
+      execute: async ({ job_id }) => ({
+        result: undefined,
+        simulationData: { transactionData: { resourceFee: 999_999n } },
+        signAndSend: async () => {
+          sent.push(job_id);
+          return {};
+        },
+      }),
+    });
+    const { log } = collectLogs();
+
+    await tick(registry, KEEPER, log, { nativeFeeTokenId: "NATIVE" });
+
+    expect(sent).toEqual([0n]);
+  });
+
+  it("skips the profitability check entirely when nativeFeeTokenId is omitted", async () => {
+    const sent: bigint[] = [];
+    const registry = fakeRegistry({
+      job_count: async () => ({ result: 1n }),
+      is_due: async () => ({ result: true }),
+      config: async () => {
+        throw new Error("config should not be called when nativeFeeTokenId is omitted");
+      },
+      execute: async ({ job_id }) => ({
+        result: undefined,
+        simulationData: { transactionData: { resourceFee: 999_999n } },
+        signAndSend: async () => {
+          sent.push(job_id);
+          return {};
+        },
+      }),
+    });
+    const { log } = collectLogs();
+
+    await tick(registry, KEEPER, log);
+
+    expect(sent).toEqual([0n]);
   });
 });

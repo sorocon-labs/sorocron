@@ -11,12 +11,13 @@
  * tracked as an open issue.
  */
 import { warnIfBalanceLow } from "./balance.js";
-import { clientFor, ensureFunded, keypairFromEnv, registryId, server } from "./config.js";
+import { NATIVE_TOKEN_CONTRACT_ID, clientFor, ensureFunded, keypairFromEnv, registryId, server } from "./config.js";
 import { describeMissingContractError } from "./contractErrors.js";
 import { tick, type RegistryLike } from "./tick.js";
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 10_000);
 const MIN_BALANCE_XLM = Number(process.env.MIN_BALANCE_XLM ?? 5);
+const MIN_PROFIT_STROOPS = BigInt(process.env.MIN_PROFIT_STROOPS ?? "0");
 const once = process.argv.includes("--once");
 
 function log(message: string) {
@@ -68,7 +69,10 @@ async function main() {
       // contract spec, so ContractMethods (config.ts) can't statically prove
       // it has job_count/is_due/execute -- it does, and RegistryLike pins
       // down exactly the shape tick() and its tests rely on.
-      await tick(registry as unknown as RegistryLike, keeper, log);
+      await tick(registry as unknown as RegistryLike, keeper, log, {
+        nativeFeeTokenId: NATIVE_TOKEN_CONTRACT_ID,
+        minProfitStroops: MIN_PROFIT_STROOPS,
+      });
     } catch (err) {
       log(`tick failed: ${err instanceof Error ? err.message : err}`);
     }
