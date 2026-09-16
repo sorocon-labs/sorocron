@@ -159,6 +159,29 @@ fn constructor_stores_config() {
     assert_eq!(s.cron.job_count(), 0);
 }
 
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn constructor_rejects_negative_min_stake() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_id = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    env.register(
+        SoroCron,
+        (
+            admin.clone(),
+            token_id.clone(),
+            token_id.clone(),
+            -1_i128,
+            UNBONDING,
+        ),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Job creation
 // ---------------------------------------------------------------------------
