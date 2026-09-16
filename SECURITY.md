@@ -23,7 +23,7 @@ Report privately through GitHub: **Security → Report a vulnerability** on this
 What to expect:
 
 - acknowledgement within 72 hours
-- an assessment and remediation plan within 7 days for confirmed issues
+- an assessment and remediation plan within 7 days for confirmed issues.
 - credit in the release notes, if you want it
 
 ## Scope
