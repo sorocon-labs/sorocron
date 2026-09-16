@@ -12,7 +12,7 @@ This document tracks the 20 structured backlog issues for the SoroCron ecosystem
   - [ ] Compute effective payout in `execute()` based on `elapsed - interval`
   - [ ] Cap max fee ramp to prevent exceeding job deposit balance
   - [ ] Add test cases verifying fee escalation over delayed ledgers
-- **Acceptance Criteria:** Fee dynamically scales up with keeper delay up to a max cap without violating balance invariants.
+- **Acceptance Criteria:** Fee dynamically scales up with keeper delay up to a max cap without violating balance invariants..
 
 ---
 
