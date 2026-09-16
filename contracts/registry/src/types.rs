@@ -34,6 +34,8 @@ pub struct JobParams {
     pub fee_per_run: i128,
     /// Maximum number of runs. `0` means unlimited.
     pub max_runs: u32,
+    /// Unix timestamp after which the job can no longer run. `0` means never.
+    pub end_at: u64,
     /// Optional contract exposing `should_run(job_id: u64) -> bool`.
     pub resolver: Option<Address>,
 }
@@ -54,6 +56,8 @@ pub struct Job {
     pub balance: i128,
     pub max_runs: u32,
     pub runs: u32,
+    /// Unix timestamp after which the job can no longer run. `0` means never.
+    pub end_at: u64,
     pub resolver: Option<Address>,
     /// `false` while the owner has paused the job.
     pub active: bool,

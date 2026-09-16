@@ -134,6 +134,7 @@ fn params(s: &Setup) -> JobParams {
         start_at: 0,
         fee_per_run: FEE,
         max_runs: 0,
+        end_at: 0,
         resolver: None,
     }
 }
@@ -356,6 +357,49 @@ fn execute_stops_at_max_runs() {
     assert_eq!(
         s.cron.try_execute(&s.keeper, &id),
         Err(Ok(Error::MaxRunsReached))
+    );
+}
+
+#[test]
+fn execute_succeeds_before_end_at() {
+    let s = setup();
+    let mut p = params(&s);
+    p.end_at = START + INTERVAL + 1;
+    let id = s.cron.create_job(&s.owner, &p, &1_000);
+
+    advance(&s.env, INTERVAL);
+    assert!(s.cron.is_due(&id));
+    s.cron.execute(&s.keeper, &id);
+    assert_eq!(s.target.count(), 1);
+}
+
+#[test]
+fn execute_rejects_at_end_at() {
+    let s = setup();
+    let mut p = params(&s);
+    p.end_at = START + INTERVAL;
+    let id = s.cron.create_job(&s.owner, &p, &1_000);
+
+    advance(&s.env, INTERVAL);
+    assert!(!s.cron.is_due(&id));
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &id),
+        Err(Ok(Error::JobExpired))
+    );
+}
+
+#[test]
+fn execute_rejects_after_end_at() {
+    let s = setup();
+    let mut p = params(&s);
+    p.end_at = START + INTERVAL;
+    let id = s.cron.create_job(&s.owner, &p, &1_000);
+
+    advance(&s.env, INTERVAL * 2);
+    assert!(!s.cron.is_due(&id));
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &id),
+        Err(Ok(Error::JobExpired))
     );
 }
 

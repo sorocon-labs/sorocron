@@ -116,6 +116,7 @@ impl SoroCron {
             balance: deposit,
             max_runs: params.max_runs,
             runs: 0,
+            end_at: params.end_at,
             resolver: params.resolver,
             active: true,
         };
@@ -538,6 +539,9 @@ fn ensure_due(job: &Job, now: u64) -> Result<(), Error> {
     }
     if job.max_runs != 0 && job.runs >= job.max_runs {
         return Err(Error::MaxRunsReached);
+    }
+    if job.end_at != 0 && now >= job.end_at {
+        return Err(Error::JobExpired);
     }
     if job.balance < job.fee_per_run {
         return Err(Error::InsufficientJobBalance);
