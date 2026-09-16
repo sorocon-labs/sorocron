@@ -10,10 +10,12 @@
  * but not for thousands of jobs; indexing JobCreated/JobCancelled events is
  * tracked as an open issue.
  */
-import { clientFor, ensureFunded, keypairFromEnv, registryId } from "./config.js";
+import { warnIfBalanceLow } from "./balance.js";
+import { clientFor, ensureFunded, keypairFromEnv, registryId, server } from "./config.js";
 import { tick, type RegistryLike } from "./tick.js";
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 10_000);
+const MIN_BALANCE_XLM = Number(process.env.MIN_BALANCE_XLM ?? 5);
 const once = process.argv.includes("--once");
 
 function log(message: string) {
@@ -50,6 +52,7 @@ async function main() {
 
   do {
     try {
+      await warnIfBalanceLow(keeper, async (address) => (await server.getAccountEntry(address)).balance, MIN_BALANCE_XLM, log);
       // `registry`'s methods are generated at runtime from the on-chain
       // contract spec, so ContractMethods (config.ts) can't statically prove
       // it has job_count/is_due/execute -- it does, and RegistryLike pins
