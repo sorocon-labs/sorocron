@@ -9,7 +9,7 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - **TTL Guardian** (`contracts/ttl-guardian`): schedule `extend(contract, threshold, extend_to)` to keep a contract's instance and code from being archived. ([#4](https://github.com/sorocon-labs/sorocron/issues/4))
 - **Two-step admin transfer:** `propose_admin`, `accept_admin`, `pending_admin`. ([#6](https://github.com/sorocon-labs/sorocron/issues/6))
 - **Per-job pause:** `set_job_active` lets owners pause and resume a job without losing its id, balance or schedule. ([#9](https://github.com/sorocon-labs/sorocron/issues/9))
-- Keeper bot: deploys and connects the executor and guardian; the demo also schedules a guardian job.
+- Keeper bot: deploys and connects the executor and guardian; the demo also schedules a guardian job..
 - `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, Dependabot, CODEOWNERS, and a WASM size budget in CI.
 
 ### Changed

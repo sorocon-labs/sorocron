@@ -3,6 +3,9 @@ target/
 node_modules/
 dist/
 .env
+# Stellar CLI configuration
 .stellar/
+# Soroban CLI configuration
 .soroban/
+# Log files
 *.log
