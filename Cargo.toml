@@ -20,6 +20,7 @@ repository = "https://github.com/sorocon-labs/sorocron"
 
 [workspace.dependencies]
 soroban-sdk = "27.0.6"
+proptest = "1.9"
 
 [profile.release]
 opt-level = "z"

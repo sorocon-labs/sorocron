@@ -14,6 +14,8 @@
 mod errors;
 mod events;
 mod executor;
+#[cfg(test)]
+mod proptests;
 mod storage;
 #[cfg(test)]
 mod test;

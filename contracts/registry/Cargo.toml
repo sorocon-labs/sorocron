@@ -18,3 +18,4 @@ soroban-sdk = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 sorocron-executor = { path = "../executor" }
 sorocron-ttl-guardian = { path = "../ttl-guardian" }
+proptest = { workspace = true }
