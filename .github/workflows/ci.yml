@@ -19,6 +19,14 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      - name: Fuzz schedule and fee math (issue #77)
+        # Property tests over the registry's pure schedule calculations:
+        # u64 timestamp edges, zero intervals, extreme fees. `cargo test`
+        # above runs them with the default 256 cases; this pass raises the
+        # case count for the PR gate.
+        run: cargo test -p sorocron-registry proptest
+        env:
+          PROPTEST_CASES: 2048
       - run: cargo build --release --target wasm32v1-none
       - name: Enforce WASM size budget
         # Soroban rejects contracts over 64 KB; fail early with headroom.
