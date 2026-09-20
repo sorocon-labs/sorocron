@@ -44,6 +44,23 @@ pub struct JobParams {
     pub resolver: Option<Address>,
 }
 
+/// Input to `update_job`. Replaces every mutable setting of a job at once;
+/// pass the current value for anything you don't want to change. The
+/// schedule's `next_run` is kept as is.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct JobUpdate {
+    pub function: Symbol,
+    pub args: Vec<Val>,
+    pub interval: u64,
+    pub fee_per_run: i128,
+    /// `0` means unlimited. Setting it at or below the current `runs` stops the job.
+    pub max_runs: u32,
+    /// `0` means never.
+    pub end_at: u64,
+    pub resolver: Option<Address>,
+}
+
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct Job {

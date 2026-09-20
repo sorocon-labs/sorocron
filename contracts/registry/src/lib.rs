@@ -22,12 +22,12 @@ mod test;
 mod types;
 
 pub use errors::Error;
-pub use types::{Config, Job, JobParams, Keeper};
+pub use types::{Config, Job, JobParams, JobUpdate, Keeper};
 
 use executor::ExecutorClient;
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, token, vec, xdr::ToXdr, Address, Env, IntoVal,
-    Symbol, Vec,
+    contract, contractimpl, panic_with_error, token, vec, xdr::ToXdr, Address, BytesN,
+    ContractExecutable, Env, IntoVal, Symbol, Vec,
 };
 
 /// Function a resolver contract must expose: `should_run(job_id: u64) -> bool`.
@@ -35,6 +35,12 @@ pub const RESOLVER_FN: &str = "should_run";
 
 /// Hard cap on `limit` in `get_jobs`, regardless of what the caller passes.
 pub const MAX_GET_JOBS_LIMIT: u32 = 50;
+
+/// Maximum number of jobs in one `create_jobs` or `execute_batch` call.
+pub const MAX_BATCH: u32 = 20;
+
+/// Returned by `version()`. See its doc comment.
+pub const VERSION: u32 = 3;
 
 #[contract]
 pub struct SoroCron;
@@ -87,62 +93,86 @@ impl SoroCron {
         ensure_not_paused(&config)?;
         owner.require_auth();
 
-        if params.interval == 0 {
-            return Err(Error::InvalidInterval);
-        }
-        if config.min_interval != 0 && params.interval < config.min_interval {
-            return Err(Error::IntervalTooShort);
-        }
-        if config.max_args != 0 && params.args.len() > config.max_args {
-            return Err(Error::TooManyArgs);
-        }
-        if params.fee_per_run <= 0 {
-            return Err(Error::InvalidFee);
-        }
-        if deposit < params.fee_per_run {
-            return Err(Error::InvalidAmount);
-        }
-        if is_forbidden_target(&env, &config, &params.target) {
-            return Err(Error::ForbiddenTarget);
-        }
-
+        validate_job(&env, &config, &params, deposit)?;
         token::TokenClient::new(&env, &config.fee_token).transfer(
             &owner,
             env.current_contract_address(),
             &deposit,
         );
+        Ok(insert_job(&env, &owner, params, deposit))
+    }
 
-        let id = storage::take_next_job_id(&env);
-        let now = env.ledger().timestamp();
-        let job = Job {
-            id,
-            owner: owner.clone(),
-            target: params.target,
-            function: params.function,
-            args: params.args,
-            interval: params.interval,
-            next_run: params.start_at.max(now),
-            fee_per_run: params.fee_per_run,
-            balance: deposit,
-            max_runs: params.max_runs,
-            runs: 0,
-            end_at: params.end_at,
-            resolver: params.resolver,
-            active: true,
-        };
+    /// Registers several jobs for one owner with a single token transfer.
+    /// `deposits[i]` funds `jobs[i]`. All-or-nothing: if any job is invalid,
+    /// none are created. Returns the new ids in input order.
+    pub fn create_jobs(
+        env: Env,
+        owner: Address,
+        jobs: Vec<JobParams>,
+        deposits: Vec<i128>,
+    ) -> Result<Vec<u64>, Error> {
+        let config = storage::load_config(&env);
+        ensure_not_paused(&config)?;
+        owner.require_auth();
+
+        if jobs.is_empty() || jobs.len() > MAX_BATCH {
+            return Err(Error::InvalidBatchSize);
+        }
+        if jobs.len() != deposits.len() {
+            return Err(Error::LengthMismatch);
+        }
+        let mut total: i128 = 0;
+        for (params, deposit) in jobs.iter().zip(deposits.iter()) {
+            validate_job(&env, &config, &params, deposit)?;
+            total = total.checked_add(deposit).ok_or(Error::InvalidAmount)?;
+        }
+
+        token::TokenClient::new(&env, &config.fee_token).transfer(
+            &owner,
+            env.current_contract_address(),
+            &total,
+        );
+        let mut ids = Vec::new(&env);
+        for (params, deposit) in jobs.iter().zip(deposits.iter()) {
+            ids.push_back(insert_job(&env, &owner, params, deposit));
+        }
+        Ok(ids)
+    }
+
+    /// Changes a job's call, schedule, fee, limits and resolver. Owner only.
+    /// The target can't change (cancel and recreate instead), and `next_run`
+    /// is kept, so a new interval takes effect after the next run.
+    pub fn update_job(env: Env, job_id: u64, update: JobUpdate) -> Result<(), Error> {
+        let config = storage::load_config(&env);
+        ensure_not_paused(&config)?;
+        let mut job = storage::get_job(&env, job_id).ok_or(Error::JobNotFound)?;
+        job.owner.require_auth();
+
+        validate_schedule(
+            &config,
+            update.interval,
+            update.args.len(),
+            update.fee_per_run,
+        )?;
+
+        job.function = update.function;
+        job.args = update.args;
+        job.interval = update.interval;
+        job.fee_per_run = update.fee_per_run;
+        job.max_runs = update.max_runs;
+        job.end_at = update.end_at;
+        job.resolver = update.resolver;
         storage::set_job(&env, &job);
-        storage::add_owner_job(&env, &owner, id);
 
-        events::JobCreated {
-            job_id: id,
-            owner,
-            target: job.target,
+        events::JobUpdated {
+            job_id,
             interval: job.interval,
             fee_per_run: job.fee_per_run,
-            deposit,
+            max_runs: job.max_runs,
+            end_at: job.end_at,
         }
         .publish(&env);
-        Ok(id)
+        Ok(())
     }
 
     /// Tops up a job's fee balance. Anyone may fund any job.
@@ -246,57 +276,43 @@ impl SoroCron {
     /// the schedule and pays `fee_per_run` to the calling keeper.
     pub fn execute(env: Env, keeper: Address, job_id: u64) -> Result<(), Error> {
         let config = storage::load_config(&env);
-        ensure_not_paused(&config)?;
-        let executor = config.executor.clone().ok_or(Error::ExecutorNotSet)?;
-        keeper.require_auth();
+        let (executor, mut keeper_info) = authorize_keeper(&env, &config, &keeper)?;
 
-        let mut keeper_info = storage::get_keeper(&env, &keeper).ok_or(Error::KeeperNotFound)?;
-        ensure_active_keeper(&config, &keeper_info)?;
-
-        let mut job = storage::get_job(&env, job_id).ok_or(Error::JobNotFound)?;
-        let now = env.ledger().timestamp();
-        ensure_due(&job, now)?;
-        if !resolver_allows(&env, &job) {
-            return Err(Error::ResolverRejected);
-        }
-
-        // Effects before interactions. (Soroban also forbids re-entrancy.)
-        job.runs += 1;
-        job.balance -= job.fee_per_run;
-        job.next_run = next_run_after(job.next_run, job.interval, now);
-        storage::set_job(&env, &job);
-
-        if job.balance < job.fee_per_run {
-            events::JobExhausted {
-                job_id,
-                balance: job.balance,
-            }
-            .publish(&env);
-        }
-
+        let fee = run_job(&env, &executor, &keeper, job_id)?;
         keeper_info.executions = keeper_info.executions.saturating_add(1);
         storage::set_keeper(&env, &keeper, &keeper_info);
-
-        // Interactions.
-        let result =
-            ExecutorClient::new(&env, &executor).execute(&job.target, &job.function, &job.args);
-        let result_hash = env.crypto().sha256(&result.to_xdr(&env)).to_bytes();
-        token::TokenClient::new(&env, &config.fee_token).transfer(
-            &env.current_contract_address(),
-            &keeper,
-            &job.fee_per_run,
-        );
-
-        events::JobExecuted {
-            job_id,
-            keeper,
-            fee: job.fee_per_run,
-            run: job.runs,
-            next_run: job.next_run,
-            result_hash,
-        }
-        .publish(&env);
+        pay_keeper(&env, &config, &keeper, fee);
         Ok(())
+    }
+
+    /// Executes every job in `job_ids` that is due, in order, and pays the
+    /// keeper all earned fees in one transfer. Jobs that aren't due, are
+    /// rejected by their resolver, or whose target call fails are skipped
+    /// instead of reverting the batch. Returns, per input id, whether it ran.
+    pub fn execute_batch(env: Env, keeper: Address, job_ids: Vec<u64>) -> Result<Vec<bool>, Error> {
+        if job_ids.is_empty() || job_ids.len() > MAX_BATCH {
+            return Err(Error::InvalidBatchSize);
+        }
+        let config = storage::load_config(&env);
+        let (executor, mut keeper_info) = authorize_keeper(&env, &config, &keeper)?;
+
+        let mut ran = Vec::new(&env);
+        let mut earned: i128 = 0;
+        for job_id in job_ids.iter() {
+            match run_job(&env, &executor, &keeper, job_id) {
+                Ok(fee) => {
+                    earned += fee;
+                    keeper_info.executions = keeper_info.executions.saturating_add(1);
+                    ran.push_back(true);
+                }
+                Err(_) => ran.push_back(false),
+            }
+        }
+        if earned > 0 {
+            storage::set_keeper(&env, &keeper, &keeper_info);
+            pay_keeper(&env, &config, &keeper, earned);
+        }
+        Ok(ran)
     }
 
     // ------------------------------------------------------------------
@@ -501,9 +517,30 @@ impl SoroCron {
         events::MaxArgsSet { max_args }.publish(&env);
     }
 
+    /// Replaces the registry's code, keeping its storage and address.
+    /// Admin only. Job owners trust the admin with this power, so production
+    /// deployments should put the admin behind a multisig or timelock.
+    pub fn upgrade(env: Env, wasm_hash: BytesN<32>) {
+        let config = storage::load_config(&env);
+        config.admin.require_auth();
+        env.deployer()
+            .update_current_contract(ContractExecutable::Wasm(wasm_hash.clone()));
+        events::Upgraded {
+            wasm_hash,
+            previous_version: VERSION,
+        }
+        .publish(&env);
+    }
+
     // ------------------------------------------------------------------
     // Views
     // ------------------------------------------------------------------
+
+    /// Interface version of this code. Bumped whenever functions, types or
+    /// events change, so clients can tell which registry they're talking to.
+    pub fn version() -> u32 {
+        VERSION
+    }
 
     pub fn config(env: Env) -> Config {
         storage::load_config(&env)
@@ -564,6 +601,85 @@ impl SoroCron {
     }
 }
 
+/// Checks a new job's parameters and deposit against the registry's limits.
+fn validate_job(
+    env: &Env,
+    config: &Config,
+    params: &JobParams,
+    deposit: i128,
+) -> Result<(), Error> {
+    validate_schedule(
+        config,
+        params.interval,
+        params.args.len(),
+        params.fee_per_run,
+    )?;
+    if deposit < params.fee_per_run {
+        return Err(Error::InvalidAmount);
+    }
+    if is_forbidden_target(env, config, &params.target) {
+        return Err(Error::ForbiddenTarget);
+    }
+    Ok(())
+}
+
+/// Checks the settings shared by `create_job` and `update_job`.
+fn validate_schedule(
+    config: &Config,
+    interval: u64,
+    args_len: u32,
+    fee_per_run: i128,
+) -> Result<(), Error> {
+    if interval == 0 {
+        return Err(Error::InvalidInterval);
+    }
+    if config.min_interval != 0 && interval < config.min_interval {
+        return Err(Error::IntervalTooShort);
+    }
+    if config.max_args != 0 && args_len > config.max_args {
+        return Err(Error::TooManyArgs);
+    }
+    if fee_per_run <= 0 {
+        return Err(Error::InvalidFee);
+    }
+    Ok(())
+}
+
+/// Stores a validated job whose deposit has already been transferred in.
+fn insert_job(env: &Env, owner: &Address, params: JobParams, deposit: i128) -> u64 {
+    let id = storage::take_next_job_id(env);
+    let now = env.ledger().timestamp();
+    let job = Job {
+        id,
+        owner: owner.clone(),
+        target: params.target,
+        function: params.function,
+        args: params.args,
+        interval: params.interval,
+        next_run: params.start_at.max(now),
+        fee_per_run: params.fee_per_run,
+        balance: deposit,
+        max_runs: params.max_runs,
+        runs: 0,
+        end_at: params.end_at,
+        resolver: params.resolver,
+        active: true,
+    };
+    storage::set_job(env, &job);
+    storage::add_owner_job(env, owner, id);
+
+    events::JobCreated {
+        job_id: id,
+        owner: owner.clone(),
+        target: job.target,
+        interval: job.interval,
+        fee_per_run: job.fee_per_run,
+        deposit,
+    }
+    .publish(env);
+    id
+}
+
 /// Jobs may not target SoroCron's own contracts or the tokens it custodies.
 /// The executor split already stops targets from using the registry's
 /// authority; this is defence in depth.
@@ -572,6 +688,70 @@ fn is_forbidden_target(env: &Env, config: &Config, target: &Address) -> bool {
         || config.executor.as_ref() == Some(target)
         || *target == config.fee_token
         || *target == config.stake_token
+}
+
+/// Checks the registry state and keeper shared by `execute` and
+/// `execute_batch`, returning the executor and the keeper's record.
+fn authorize_keeper(
+    env: &Env,
+    config: &Config,
+    keeper: &Address,
+) -> Result<(Address, Keeper), Error> {
+    ensure_not_paused(config)?;
+    let executor = config.executor.clone().ok_or(Error::ExecutorNotSet)?;
+    keeper.require_auth();
+    let info = storage::get_keeper(env, keeper).ok_or(Error::KeeperNotFound)?;
+    ensure_active_keeper(config, &info)?;
+    Ok((executor, info))
+}
+
+/// Runs one job if it is due and returns the fee the keeper earned. Nothing
+/// is written unless the target call succeeds. (Soroban forbids re-entrancy,
+/// so the target can't observe the registry mid-update.)
+fn run_job(env: &Env, executor: &Address, keeper: &Address, job_id: u64) -> Result<i128, Error> {
+    let mut job = storage::get_job(env, job_id).ok_or(Error::JobNotFound)?;
+    let now = env.ledger().timestamp();
+    ensure_due(&job, now)?;
+    if !resolver_allows(env, &job) {
+        return Err(Error::ResolverRejected);
+    }
+
+    let result = ExecutorClient::new(env, executor)
+        .try_execute(&job.target, &job.function, &job.args)
+        .map_err(|_| Error::TargetFailed)?
+        .map_err(|_| Error::TargetFailed)?;
+    let result_hash = env.crypto().sha256(&result.to_xdr(env)).to_bytes();
+
+    job.runs += 1;
+    job.balance -= job.fee_per_run;
+    job.next_run = next_run_after(job.next_run, job.interval, now);
+    storage::set_job(env, &job);
+
+    if job.balance < job.fee_per_run {
+        events::JobExhausted {
+            job_id,
+            balance: job.balance,
+        }
+        .publish(env);
+    }
+    events::JobExecuted {
+        job_id,
+        keeper: keeper.clone(),
+        fee: job.fee_per_run,
+        run: job.runs,
+        next_run: job.next_run,
+        result_hash,
+    }
+    .publish(env);
+    Ok(job.fee_per_run)
+}
+
+fn pay_keeper(env: &Env, config: &Config, keeper: &Address, amount: i128) {
+    token::TokenClient::new(env, &config.fee_token).transfer(
+        &env.current_contract_address(),
+        keeper,
+        &amount,
+    );
 }
 
 fn ensure_not_paused(config: &Config) -> Result<(), Error> {

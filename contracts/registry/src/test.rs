@@ -1,4 +1,4 @@
-use crate::{events, Error, JobParams, SoroCron, SoroCronClient};
+use crate::{events, Error, JobParams, JobUpdate, SoroCron, SoroCronClient, MAX_BATCH, VERSION};
 use soroban_sdk::testutils::Deployer as _;
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
@@ -6,7 +6,7 @@ use soroban_sdk::{
     token::{StellarAssetClient, TokenClient},
     vec,
     xdr::ToXdr,
-    Address, Env, Event as _, IntoVal, Symbol, Val, Vec,
+    Address, BytesN, Env, Event as _, IntoVal, Symbol, Val, Vec,
 };
 use sorocron_executor::Executor;
 use sorocron_ttl_guardian::TtlGuardian;
@@ -32,6 +32,10 @@ impl MockTarget {
         let count: u32 = env.storage().instance().get(&key).unwrap_or(0) + by;
         env.storage().instance().set(&key, &count);
         count
+    }
+
+    pub fn fail(_env: Env) {
+        panic!("target always fails");
     }
 
     pub fn count(env: Env) -> u32 {
@@ -1366,4 +1370,315 @@ fn min_stake_set_event() {
     }
     .to_xdr(&s.env, &s.cron.address);
     assert_eq!(last_event(&s), expected);
+}
+
+// ---------------------------------------------------------------------------
+// Batch creation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn create_jobs_escrows_total_in_one_transfer_and_returns_ids_in_order() {
+    let s = setup();
+    let jobs = vec![&s.env, params(&s), params(&s), params(&s)];
+    let deposits = vec![&s.env, 100_i128, 200, 300];
+
+    let ids = s.cron.create_jobs(&s.owner, &jobs, &deposits);
+
+    assert_eq!(ids, vec![&s.env, 0_u64, 1, 2]);
+    assert_eq!(s.token.balance(&s.owner), INITIAL_BALANCE - 600);
+    assert_eq!(s.cron.get_job(&1).unwrap().balance, 200);
+    assert_eq!(s.cron.jobs_by_owner(&s.owner), ids);
+}
+
+#[test]
+fn create_jobs_is_all_or_nothing() {
+    let s = setup();
+    let mut bad = params(&s);
+    bad.interval = 0;
+    let jobs = vec![&s.env, params(&s), bad];
+    let deposits = vec![&s.env, 100_i128, 100];
+
+    assert_eq!(
+        s.cron.try_create_jobs(&s.owner, &jobs, &deposits),
+        Err(Ok(Error::InvalidInterval))
+    );
+    assert_eq!(s.cron.job_count(), 0);
+    assert_eq!(s.token.balance(&s.owner), INITIAL_BALANCE);
+}
+
+#[test]
+fn create_jobs_rejects_bad_batch_shapes() {
+    let s = setup();
+    let empty: Vec<JobParams> = Vec::new(&s.env);
+    assert_eq!(
+        s.cron.try_create_jobs(&s.owner, &empty, &Vec::new(&s.env)),
+        Err(Ok(Error::InvalidBatchSize))
+    );
+
+    assert_eq!(
+        s.cron.try_create_jobs(
+            &s.owner,
+            &vec![&s.env, params(&s)],
+            &vec![&s.env, 100_i128, 100]
+        ),
+        Err(Ok(Error::LengthMismatch))
+    );
+
+    let mut jobs = Vec::new(&s.env);
+    let mut deposits = Vec::new(&s.env);
+    for _ in 0..=MAX_BATCH {
+        jobs.push_back(params(&s));
+        deposits.push_back(100_i128);
+    }
+    assert_eq!(
+        s.cron.try_create_jobs(&s.owner, &jobs, &deposits),
+        Err(Ok(Error::InvalidBatchSize))
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Updating jobs
+// ---------------------------------------------------------------------------
+
+fn update_from(s: &Setup, job_id: u64) -> JobUpdate {
+    let job = s.cron.get_job(&job_id).unwrap();
+    JobUpdate {
+        function: job.function,
+        args: job.args,
+        interval: job.interval,
+        fee_per_run: job.fee_per_run,
+        max_runs: job.max_runs,
+        end_at: job.end_at,
+        resolver: job.resolver,
+    }
+}
+
+#[test]
+fn update_job_changes_settings_and_keeps_schedule_and_balance() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.execute(&s.keeper, &id);
+    let before = s.cron.get_job(&id).unwrap();
+
+    let mut u = update_from(&s, id);
+    u.args = vec![&s.env, 5u32.into_val(&s.env)];
+    u.interval = 3_600;
+    u.fee_per_run = 20;
+    u.max_runs = 4;
+    s.cron.update_job(&id, &u);
+
+    let job = s.cron.get_job(&id).unwrap();
+    assert_eq!(job.interval, 3_600);
+    assert_eq!(job.fee_per_run, 20);
+    assert_eq!(job.max_runs, 4);
+    assert_eq!(job.next_run, before.next_run);
+    assert_eq!(job.balance, before.balance);
+    assert_eq!(job.runs, 1);
+
+    // The next run uses the new args and fee.
+    advance(&s.env, INTERVAL);
+    s.cron.execute(&s.keeper, &id);
+    assert_eq!(s.target.count(), 6);
+    assert_eq!(s.cron.get_job(&id).unwrap().balance, before.balance - 20);
+}
+
+#[test]
+fn update_job_validates_like_create_job() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let mut u = update_from(&s, id);
+    u.interval = 0;
+    assert_eq!(
+        s.cron.try_update_job(&id, &u),
+        Err(Ok(Error::InvalidInterval))
+    );
+
+    let mut u = update_from(&s, id);
+    u.fee_per_run = 0;
+    assert_eq!(s.cron.try_update_job(&id, &u), Err(Ok(Error::InvalidFee)));
+
+    s.cron.set_min_interval(&120);
+    let u = update_from(&s, id);
+    assert_eq!(
+        s.cron.try_update_job(&id, &u),
+        Err(Ok(Error::IntervalTooShort))
+    );
+
+    assert_eq!(
+        s.cron.try_update_job(&99, &update_from(&s, id)),
+        Err(Ok(Error::JobNotFound))
+    );
+}
+
+#[test]
+fn only_owner_can_update_job() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    let u = update_from(&s, id);
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "update_job",
+            args: (id, u.clone()).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_update_job(&id, &u).is_err());
+}
+
+#[test]
+fn job_updated_event() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    let mut u = update_from(&s, id);
+    u.end_at = START + 1_000;
+    s.cron.update_job(&id, &u);
+
+    assert_eq!(
+        last_event(&s),
+        events::JobUpdated {
+            job_id: id,
+            interval: INTERVAL,
+            fee_per_run: FEE,
+            max_runs: 0,
+            end_at: START + 1_000,
+        }
+        .to_xdr(&s.env, &s.cron.address)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Batch execution and failing targets
+// ---------------------------------------------------------------------------
+
+fn failing_params(s: &Setup) -> JobParams {
+    let mut p = params(s);
+    p.function = Symbol::new(&s.env, "fail");
+    p.args = Vec::new(&s.env);
+    p
+}
+
+#[test]
+fn failing_target_reverts_execute_with_target_failed() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &failing_params(&s), &100);
+
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &id),
+        Err(Ok(Error::TargetFailed))
+    );
+    let job = s.cron.get_job(&id).unwrap();
+    assert_eq!(job.runs, 0);
+    assert_eq!(job.balance, 100);
+    assert_eq!(s.cron.get_keeper(&s.keeper).unwrap().executions, 0);
+}
+
+#[test]
+fn execute_batch_runs_due_jobs_and_skips_the_rest() {
+    let s = setup();
+    let due = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let mut later = params(&s);
+    later.start_at = START + 1_000;
+    let not_due = s.cron.create_job(&s.owner, &later, &100);
+
+    let broken = s.cron.create_job(&s.owner, &failing_params(&s), &100);
+    let due_too = s.cron.create_job(&s.owner, &params(&s), &100);
+    let keeper_before = s.token.balance(&s.keeper);
+
+    let ran = s
+        .cron
+        .execute_batch(&s.keeper, &vec![&s.env, due, not_due, broken, 999, due_too]);
+
+    assert_eq!(ran, vec![&s.env, true, false, false, false, true]);
+    assert_eq!(s.target.count(), 2);
+    assert_eq!(s.token.balance(&s.keeper), keeper_before + 2 * FEE);
+    assert_eq!(s.cron.get_keeper(&s.keeper).unwrap().executions, 2);
+    assert_eq!(s.cron.get_job(&broken).unwrap().balance, 100);
+    assert_eq!(s.cron.get_job(&not_due).unwrap().runs, 0);
+}
+
+#[test]
+fn execute_batch_with_nothing_due_pays_nothing() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+    s.cron.execute(&s.keeper, &id);
+    let keeper_before = s.token.balance(&s.keeper);
+
+    let ran = s.cron.execute_batch(&s.keeper, &vec![&s.env, id]);
+    assert_eq!(ran, vec![&s.env, false]);
+    assert_eq!(s.token.balance(&s.keeper), keeper_before);
+}
+
+#[test]
+fn execute_batch_checks_keeper_and_batch_size() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let stranger = Address::generate(&s.env);
+    assert_eq!(
+        s.cron.try_execute_batch(&stranger, &vec![&s.env, id]),
+        Err(Ok(Error::KeeperNotFound))
+    );
+    assert_eq!(
+        s.cron.try_execute_batch(&s.keeper, &Vec::new(&s.env)),
+        Err(Ok(Error::InvalidBatchSize))
+    );
+
+    let mut ids = Vec::new(&s.env);
+    for _ in 0..=MAX_BATCH {
+        ids.push_back(id);
+    }
+    assert_eq!(
+        s.cron.try_execute_batch(&s.keeper, &ids),
+        Err(Ok(Error::InvalidBatchSize))
+    );
+
+    s.cron.set_paused(&true);
+    assert_eq!(
+        s.cron.try_execute_batch(&s.keeper, &vec![&s.env, id]),
+        Err(Ok(Error::Paused))
+    );
+}
+
+#[test]
+fn same_job_twice_in_a_batch_runs_once() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &100);
+
+    let ran = s.cron.execute_batch(&s.keeper, &vec![&s.env, id, id]);
+    assert_eq!(ran, vec![&s.env, true, false]);
+    assert_eq!(s.cron.get_job(&id).unwrap().runs, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Upgrades
+// ---------------------------------------------------------------------------
+
+#[test]
+fn version_is_exposed() {
+    let s = setup();
+    assert_eq!(s.cron.version(), VERSION);
+}
+
+#[test]
+fn only_admin_can_upgrade() {
+    let s = setup();
+    let hash = BytesN::from_array(&s.env, &[7; 32]);
+    let stranger = Address::generate(&s.env);
+
+    s.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &s.cron.address,
+            fn_name: "upgrade",
+            args: (hash.clone(),).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(s.cron.try_upgrade(&hash).is_err());
 }

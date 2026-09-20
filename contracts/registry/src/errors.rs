@@ -28,4 +28,10 @@ pub enum Error {
     JobExpired = 20,
     IntervalTooShort = 21,
     TooManyArgs = 22,
+    /// The target call panicked or returned an error.
+    TargetFailed = 23,
+    /// A batch was empty or longer than `MAX_BATCH`.
+    InvalidBatchSize = 24,
+    /// Parallel input vectors had different lengths.
+    LengthMismatch = 25,
 }

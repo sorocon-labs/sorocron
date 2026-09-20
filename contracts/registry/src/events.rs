@@ -148,3 +148,21 @@ pub struct MinIntervalSet {
 pub struct MaxArgsSet {
     pub max_args: u32,
 }
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobUpdated {
+    #[topic]
+    pub job_id: u64,
+    pub interval: u64,
+    pub fee_per_run: i128,
+    pub max_runs: u32,
+    pub end_at: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Upgraded {
+    pub wasm_hash: BytesN<32>,
+    pub previous_version: u32,
+}
