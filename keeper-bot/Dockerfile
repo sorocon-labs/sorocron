@@ -32,4 +32,8 @@ COPY keeper-bot/package.json ./
 COPY --from=build /app/dist ./dist
 COPY deployments ./deployments
 USER keeper
+ENV METRICS_PORT=9464
+EXPOSE 9464
+# /healthz turns 503 when ticks stop succeeding (RPC down, keeper out of XLM).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3   CMD node -e "fetch('http://127.0.0.1:'+process.env.METRICS_PORT+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 ENTRYPOINT ["node", "dist/keeper.js"]

@@ -37,9 +37,10 @@ describe("tick", () => {
     });
     const { log, lines } = collectLogs();
 
-    await tick(registry, KEEPER, log);
+    const summary = await tick(registry, KEEPER, log);
 
     expect(executed).toEqual([1n]);
+    expect(summary).toMatchObject({ checked: 3, due: 1, executed: 1, skipped: 0, failed: 0 });
     expect(lines.some((l) => l.includes("job 1: executed"))).toBe(true);
   });
 
@@ -59,9 +60,10 @@ describe("tick", () => {
     });
     const { log, lines } = collectLogs();
 
-    await tick(registry, KEEPER, log);
+    const summary = await tick(registry, KEEPER, log);
 
     expect(lines.some((l) => l.includes("job 0: skipped (JobNotDue)"))).toBe(true);
+    expect(summary.skipped).toBe(1);
   });
 
   it("logs and continues when signAndSend fails (e.g. another keeper won the race)", async () => {

@@ -65,12 +65,24 @@ export interface TickOptions {
   maxConcurrency?: number;
 }
 
+/** What one tick did, for metrics. Every due job lands in exactly one of executed/skipped/unprofitable/failed. */
+export interface TickSummary {
+  checked: number;
+  due: number;
+  executed: number;
+  skipped: number;
+  unprofitable: number;
+  failed: number;
+  /** Sum of fee_per_run for executed jobs whose fee was read (native fee token only). */
+  earnedStroops: bigint;
+}
+
 export async function tick(
   registry: RegistryLike,
   keeper: string,
   log: Logger,
   options: TickOptions = {},
-): Promise<void> {
+): Promise<TickSummary> {
   const minProfitStroops = options.minProfitStroops ?? 0n;
   const maxConcurrency = options.maxConcurrency ?? 1;
 
@@ -96,6 +108,15 @@ export async function tick(
     }
   });
   const dueJobIds = jobIds.filter((_, i) => dueFlags[i]);
+  const summary: TickSummary = {
+    checked: jobIds.length,
+    due: dueJobIds.length,
+    executed: 0,
+    skipped: 0,
+    unprofitable: 0,
+    failed: 0,
+    earnedStroops: 0n,
+  };
 
   // Phase 2: build, simulate and send each due job's transaction, one at a
   // time (see the module doc comment for why this can't be parallelized).
@@ -105,11 +126,14 @@ export async function tick(
       const simulated = tx.result;
       if (simulated && typeof simulated.isErr === "function" && simulated.isErr()) {
         log(`job ${jobId}: skipped (${simulated.unwrapErr!().message})`);
+        summary.skipped++;
         continue;
       }
 
+      let fee = 0n;
       if (options.nativeFeeTokenId && feeToken === options.nativeFeeTokenId) {
         const job = (await registry.get_job({ job_id: jobId })).result;
+        fee = job?.fee_per_run ?? 0n;
         const resourceFee = tx.simulationData?.transactionData.resourceFee ?? 0n;
         const profit = (job?.fee_per_run ?? 0n) - resourceFee;
         if (profit < minProfitStroops) {
@@ -117,6 +141,7 @@ export async function tick(
             `job ${jobId}: skipped (unprofitable: fee ${job?.fee_per_run ?? 0n} stroops, ` +
               `resource cost ~${resourceFee} stroops)`,
           );
+          summary.unprofitable++;
           continue;
         }
       }
@@ -124,9 +149,13 @@ export async function tick(
       const sent = await tx.signAndSend();
       const hash = sent.sendTransactionResponse?.hash;
       log(`job ${jobId}: executed${hash ? ` ${EXPLORER}/tx/${hash}` : ""}`);
+      summary.executed++;
+      summary.earnedStroops += fee;
     } catch (err) {
       // Another keeper may have executed it first; that's expected.
       log(`job ${jobId}: execution failed (${err instanceof Error ? err.message.split("\n")[0] : err})`);
+      summary.failed++;
     }
   }
+  return summary;
 }

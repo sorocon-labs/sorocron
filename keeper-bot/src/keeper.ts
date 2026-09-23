@@ -6,6 +6,9 @@
  *   npm run keeper            run forever
  *   npm run keeper -- --once  single pass (useful in CI or cron)
  *
+ * Observability: set METRICS_PORT to serve Prometheus metrics on /metrics
+ * and a liveness probe on /healthz; set LOG_FORMAT=json for structured logs.
+ *
  * This implementation scans every job id each tick. That is fine for a demo
  * but not for thousands of jobs; indexing JobCreated/JobCancelled events is
  * tracked as an open issue.
@@ -13,17 +16,19 @@
 import { warnIfBalanceLow } from "./balance.js";
 import { NATIVE_TOKEN_CONTRACT_ID, clientFor, ensureFunded, keypairFromEnv, registryId, server } from "./config.js";
 import { describeMissingContractError } from "./contractErrors.js";
-import { tick, type RegistryLike } from "./tick.js";
+import { createLogger } from "./logger.js";
+import { Metrics, startMetricsServer, type HealthState } from "./metrics.js";
+import { tick, type RegistryLike, type TickSummary } from "./tick.js";
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 10_000);
 const MIN_BALANCE_XLM = Number(process.env.MIN_BALANCE_XLM ?? 5);
 const MIN_PROFIT_STROOPS = BigInt(process.env.MIN_PROFIT_STROOPS ?? "0");
 const MAX_CONCURRENCY = Number(process.env.MAX_CONCURRENCY ?? 5);
+const METRICS_PORT = Number(process.env.METRICS_PORT ?? 0);
 const once = process.argv.includes("--once");
 
-function log(message: string) {
-  console.log(`[${new Date().toISOString()}] ${message}`);
-}
+const logger = createLogger();
+const log = logger.info;
 
 async function main() {
   const keypair = keypairFromEnv();
@@ -57,29 +62,72 @@ async function main() {
 
   log(`Keeper ${keeper} watching registry ${contractId}`);
 
+  const metrics = new Metrics();
+  const health: HealthState = { lastSuccessMs: 0 };
+  // Three missed polls in a row means something is wrong (RPC down, account
+  // out of XLM, ...); the generous window avoids flapping on a slow tick.
+  const staleAfterMs = Math.max(3 * POLL_INTERVAL_MS, 60_000);
+  const metricsServer = METRICS_PORT ? startMetricsServer(METRICS_PORT, metrics, health, staleAfterMs) : undefined;
+  if (metricsServer) log(`Metrics on :${METRICS_PORT}/metrics, health on :${METRICS_PORT}/healthz`);
+
   let stopping = false;
-  process.on("SIGINT", () => {
+  const stop = () => {
     log("Shutting down...");
     stopping = true;
-  });
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
 
   do {
     try {
-      await warnIfBalanceLow(keeper, async (address) => (await server.getAccountEntry(address)).balance, MIN_BALANCE_XLM, log);
+      await warnIfBalanceLow(
+        keeper,
+        async (address) => {
+          const balance = (await server.getAccountEntry(address)).balance;
+          metrics.set("sorocron_keeper_balance_stroops", "Native XLM balance of the keeper account", Number(balance));
+          return balance;
+        },
+        MIN_BALANCE_XLM,
+        logger.warn,
+      );
       // `registry`'s methods are generated at runtime from the on-chain
       // contract spec, so ContractMethods (config.ts) can't statically prove
       // it has job_count/is_due/execute -- it does, and RegistryLike pins
       // down exactly the shape tick() and its tests rely on.
-      await tick(registry as unknown as RegistryLike, keeper, log, {
+      const started = Date.now();
+      const summary = await tick(registry as unknown as RegistryLike, keeper, log, {
         nativeFeeTokenId: NATIVE_TOKEN_CONTRACT_ID,
         minProfitStroops: MIN_PROFIT_STROOPS,
         maxConcurrency: MAX_CONCURRENCY,
       });
+      health.lastSuccessMs = Date.now();
+      recordTick(metrics, summary, health.lastSuccessMs - started);
     } catch (err) {
-      log(`tick failed: ${err instanceof Error ? err.message : err}`);
+      metrics.inc("sorocron_keeper_tick_errors_total", "Ticks that threw before finishing");
+      logger.error(`tick failed: ${err instanceof Error ? err.message : err}`);
     }
     if (!once && !stopping) await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   } while (!once && !stopping);
+  metricsServer?.close();
+}
+
+function recordTick(metrics: Metrics, summary: TickSummary, durationMs: number) {
+  metrics.inc("sorocron_keeper_ticks_total", "Completed polling passes");
+  metrics.set("sorocron_keeper_tick_duration_seconds", "Duration of the last tick", durationMs / 1000);
+  metrics.set("sorocron_keeper_last_tick_timestamp_seconds", "Unix time of the last completed tick", Date.now() / 1000);
+  metrics.set("sorocron_keeper_jobs_checked", "Job ids checked in the last tick", summary.checked);
+  metrics.set("sorocron_keeper_jobs_due", "Jobs that were due in the last tick", summary.due);
+  const help = "Due jobs by outcome";
+  metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "executed" }, summary.executed);
+  metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "skipped" }, summary.skipped);
+  metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "unprofitable" }, summary.unprofitable);
+  metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "failed" }, summary.failed);
+  metrics.inc(
+    "sorocron_keeper_fees_earned_stroops_total",
+    "Fees earned from executed jobs paid in native XLM",
+    {},
+    Number(summary.earnedStroops),
+  );
 }
 
 main().catch((err) => {
