@@ -1,0 +1,15 @@
+{
+  "name": "sorocron-workspace",
+  "private": true,
+  "description": "npm workspace for the SoroCron TypeScript SDK and web app. The keeper bot is a standalone package in keeper-bot/.",
+  "workspaces": [
+    "packages/sdk",
+    "app"
+  ],
+  "scripts": {
+    "build": "npm run build -w @sorocron/sdk && npm run build -w sorocron-app",
+    "test": "npm test -w @sorocron/sdk",
+    "typecheck": "npm run typecheck --workspaces",
+    "dev": "npm run dev -w sorocron-app"
+  }
+}
