@@ -8,7 +8,14 @@
     "url": "https://github.com/sorocon-labs/sorocron",
     "directory": "packages/sdk"
   },
-  "keywords": ["stellar", "soroban", "automation", "cron", "keeper", "smart-contracts"],
+  "keywords": [
+    "stellar",
+    "soroban",
+    "automation",
+    "cron",
+    "keeper",
+    "smart-contracts"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,7 +25,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -30,6 +40,6 @@
   "devDependencies": {
     "@stellar/stellar-sdk": "^17.2.1",
     "typescript": "^7.0.2",
-    "vitest": "^2.1.9"
+    "vitest": "^5.0.3"
   }
 }

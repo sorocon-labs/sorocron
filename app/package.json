@@ -1,0 +1,27 @@
+{
+  "name": "sorocron-app",
+  "private": true,
+  "version": "0.3.0",
+  "description": "SoroCron web dashboard: browse jobs, schedule and manage your own with Freighter, and run a keeper",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.3"
+  },
+  "dependencies": {
+    "@stellar/freighter-api": "^6.0.1",
+    "@stellar/stellar-sdk": "^17.2.1",
+    "buffer": "^6.0.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
+}
