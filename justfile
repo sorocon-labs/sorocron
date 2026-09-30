@@ -32,3 +32,7 @@ demo:
 # Run the keeper bot, executing due jobs until stopped.
 keeper:
     cd keeper-bot && npm install && npm run keeper
+
+# Run the web dashboard locally at http://localhost:5173.
+app:
+    npm install && npm run dev

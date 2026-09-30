@@ -1,7 +1,7 @@
 /**
  * Deploys the SoroCron contracts and examples to testnet.
  *
- *   cargo build --release --target wasm32v1-none   (from the repo root)
+ *   stellar contract build   (from the repo root)
  *   npm run deploy:testnet                          (from keeper-bot/)
  *
  * If STELLAR_SECRET_KEY is unset, a fresh keypair is generated, funded with
@@ -41,7 +41,7 @@ const UNBONDING_PERIOD_SECONDS = 3_600n;
 async function uploadWasm(keypair: Keypair, file: string): Promise<string> {
   const path = resolve(WASM_DIR, file);
   if (!existsSync(path)) {
-    throw new Error(`${path} not found. Run \`cargo build --release --target wasm32v1-none\` in the repo root.`);
+    throw new Error(`${path} not found. Run \`stellar contract build\` in the repo root.`);
   }
   const wasm = readFileSync(path);
   const hash = createHash("sha256").update(wasm).digest("hex");

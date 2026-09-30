@@ -81,14 +81,16 @@ Keepers check daily and extend your contract's instance and code TTL whenever it
 
 ## Quick start
 
-**Requirements:** [Rust](https://rustup.rs) (stable) and Node.js 20+.
+**Requirements:** [Rust](https://rustup.rs) (stable), the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) v25.2+ and Node.js 20+.
 
 ```bash
 rustup target add wasm32v1-none
+# Stellar CLI v25.2+ builds the contract WASM (soroban-sdk 28 requires it)
+cargo install --locked stellar-cli
 
 # Contracts: test and build
 cargo test
-cargo build --release --target wasm32v1-none
+stellar contract build
 
 # Keeper bot
 cd keeper-bot
