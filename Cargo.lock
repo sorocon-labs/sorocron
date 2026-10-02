@@ -1885,56 +1885,56 @@ dependencies = [
 
 [[package]]
 name = "sorocron-example-counter"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
 name = "sorocron-example-dca"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
 name = "sorocron-example-flag-resolver"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
 name = "sorocron-example-oracle-trigger"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
 name = "sorocron-example-subscription"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
 name = "sorocron-example-vesting"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
 name = "sorocron-executor"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
 name = "sorocron-registry"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "proptest",
  "soroban-sdk",
@@ -1944,7 +1944,7 @@ dependencies = [
 
 [[package]]
 name = "sorocron-ttl-guardian"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "soroban-sdk",
 ]

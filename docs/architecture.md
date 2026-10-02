@@ -117,3 +117,6 @@ The test `guardian_job_keeps_target_contract_from_being_archived` runs this end 
 | 20 | `JobExpired` | `now >= end_at` |
 | 21 | `IntervalTooShort` | `interval` below the admin-configured `min_interval` |
 | 22 | `TooManyArgs` | `args` longer than the admin-configured `max_args` |
+| 23 | `TargetFailed` | The target call panicked or returned an error; nothing is written |
+| 24 | `InvalidBatchSize` | `create_jobs` / `execute_batch` got 0 or more than 20 items |
+| 25 | `LengthMismatch` | `create_jobs` got different numbers of jobs and deposits |

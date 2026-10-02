@@ -3,8 +3,8 @@
 **Decentralized automation for Soroban smart contracts on Stellar.**
 
 [![CI](https://github.com/sorocon-labs/sorocron/actions/workflows/ci.yml/badge.svg)](https://github.com/sorocon-labs/sorocron/actions/workflows/ci.yml)
-![Soroban SDK](https://img.shields.io/badge/soroban--sdk-27.0.6-blue)
-![Version](https://img.shields.io/badge/version-0.2.0-orange)
+![Soroban SDK](https://img.shields.io/badge/soroban--sdk-28.0.0-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-orange)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 Soroban contracts can't run themselves: nothing happens on-chain until someone sends a transaction. Every protocol that needs recurring or conditional actions (vesting releases, liquidations, rebalancing, subscription charges, DAO execution, keeping state from being archived) ends up running its own private cron server, which becomes a centralized single point of failure.
@@ -25,9 +25,12 @@ SoroCron replaces those servers with an open network:
 | 🛡️ **Fund-less executor** | Targets are called by a contract that owns nothing, so jobs can never borrow the registry's authority |
 | 🧊 **State archival protection** | TTL Guardian extends a contract's instance and code TTL on schedule |
 | 🔒 **Keeper staking** | Minimum stake, unbonding period, per-keeper execution stats |
-| ⏸️ **Owner controls** | Fund, pause, resume or cancel jobs; refunds always available |
-| 🚨 **Safe administration** | Emergency pause that never blocks exits; two-step admin handover |
-| 🤖 **Reference keeper** | TypeScript keeper node with testnet deploy and end-to-end demo |
+| ⏸️ **Owner controls** | Fund, update, pause, resume or cancel jobs; refunds always available |
+| 📦 **Batching** | Register up to 20 jobs with one transfer; keepers run up to 20 due jobs per transaction, skipping failures |
+| 🚨 **Safe administration** | Emergency pause that never blocks exits; two-step admin handover; versioned, admin-gated upgrades |
+| 🤖 **Reference keeper** | TypeScript keeper node with Prometheus metrics, health checks, Docker and an end-to-end demo |
+| 🖥️ **Web dashboard** | Browse jobs, schedule and manage your own with Freighter, stake as a keeper ([`app/`](app)) |
+| 🧰 **TypeScript SDK** | Typed client, argument builders and readable errors ([`@sorocron/sdk`](packages/sdk)) |
 
 ## Live on testnet (v0.2.0)
 
@@ -106,6 +109,13 @@ npm run demo
 npm run keeper
 ```
 
+Run the web dashboard (reads the testnet registry; connect [Freighter](https://www.freighter.app) on Testnet to sign):
+
+```bash
+npm install   # from the repository root
+npm run dev   # http://localhost:5173
+```
+
 To run just the keeper node in Docker instead: copy `keeper-bot/.env.example` to
 `keeper-bot/.env`, fill it in (`npm run deploy:testnet` above can generate the key), then
 from the repository root:
@@ -129,11 +139,14 @@ A `stellar contract invoke` example for every registry function is in [docs/cli.
 | Function | Who | Description |
 |---|---|---|
 | `create_job(owner, params, deposit) -> u64` | anyone | Register a job and escrow its fee deposit |
+| `create_jobs(owner, jobs, deposits) -> Vec<u64>` | anyone | Register up to 20 jobs in one transfer, all or nothing |
+| `update_job(job_id, update)` | job owner | Change function, args, interval, fee, limits or resolver; keeps balance and schedule |
 | `fund_job(from, job_id, amount) -> i128` | anyone | Top up a job's balance |
 | `set_job_active(job_id, active)` | job owner | Pause or resume a job |
 | `withdraw_job_balance(job_id, amount) -> i128` | job owner | Withdraw part of a job's balance without cancelling it |
 | `cancel_job(job_id) -> i128` | job owner | Delete the job and refund the balance |
 | `execute(keeper, job_id)` | staked keeper | Run a due job and collect `fee_per_run` |
+| `execute_batch(keeper, job_ids) -> Vec<bool>` | staked keeper | Run every due job in the list, skip the rest, collect all fees in one transfer |
 | `stake(keeper, amount) -> i128` | anyone | Become a keeper / add stake |
 | `begin_unbonding(keeper) -> u64` | keeper | Stop executing; start the withdrawal timer |
 | `withdraw_stake(keeper) -> i128` | keeper | Withdraw stake after unbonding |
@@ -141,7 +154,8 @@ A `stellar contract invoke` example for every registry function is in [docs/cli.
 | `propose_admin(new_admin)` / `cancel_admin_proposal()` / `accept_admin()` | admin / admin / proposed admin | Two-step admin handover |
 | `set_paused(bool)` / `set_min_stake(i128)` | admin | Emergency pause / keeper requirements |
 | `set_min_interval(u64)` / `set_max_args(u32)` | admin | Minimum job interval / maximum `args` length (`0` = no limit) |
-| `is_due`, `get_job`, `get_jobs(start, limit)`, `jobs_by_owner`, `get_keeper`, `job_count`, `config`, `pending_admin` | anyone | Read-only views |
+| `upgrade(wasm_hash)` | admin | Replace the registry code, keeping storage and address |
+| `is_due`, `get_job`, `get_jobs(start, limit)`, `jobs_by_owner`, `get_keeper`, `job_count`, `config`, `pending_admin`, `version` | anyone | Read-only views |
 
 `JobParams`: `target`, `function`, `args`, `interval` (seconds), `start_at` (unix time, `0` = now), `fee_per_run`, `max_runs` (`0` = unlimited), `end_at` (unix time, `0` = never), `resolver` (optional).
 
@@ -172,15 +186,21 @@ contracts/
   ttl-guardian/            scheduled TTL extension against state archival
   examples/counter/        minimal job target
   examples/flag-resolver/  minimal resolver
+  examples/dca/            dollar-cost averaging vault driven by a job
+  examples/vesting/        cliff + linear vesting released by a job
+  examples/subscription/   recurring payments charged by a job
+  examples/oracle-trigger/ resolver that fires on an oracle price threshold
 keeper-bot/                reference keeper node + deploy/demo scripts (TypeScript)
+packages/sdk/              @sorocron/sdk, typed TypeScript client
+app/                       web dashboard (Vite + React + Freighter)
 deployments/               deployed contract addresses per network
 docs/                      architecture and security model
 ```
 
 ## Project status
 
-- 5 contracts, 44 unit and integration tests (`cargo test`)
-- CI: formatting, clippy with warnings as errors, tests, WASM build with a size budget, keeper typecheck
+- 9 contracts (3 core, 6 examples); 108 Rust tests including property-based fuzzing of schedule and fee math, 39 keeper tests, 10 SDK tests
+- CI: formatting, clippy with warnings as errors, tests, fuzzing, WASM build with a size budget, keeper/SDK/app typecheck, test and build
 - Deployed and exercised on testnet
 - **Not audited.** See [Security](#security).
 
@@ -189,8 +209,8 @@ docs/                      architecture and security model
 - [x] **M1: Core.** Registry, interval scheduling, resolvers, keeper staking and unbonding, pause, reference keeper, testnet deployment
 - [x] **M2: Hardening.** Fund-less executor, two-step admin, per-job pause
 - [x] **M3: State archival.** TTL Guardian
-- [ ] **M4: Keeper economics.** Rotating execution windows, slashing, protocol fee, failure tracking, batch execution
-- [ ] **M5: Developer experience.** Typed TypeScript SDK, CLI, web dashboard, integrations (vesting, DCA, oracle-triggered actions, subscriptions)
+- [ ] **M4: Keeper economics.** ~~Batch execution~~ (v0.3), rotating execution windows, slashing, protocol fee, failure tracking
+- [ ] **M5: Developer experience.** ~~Typed TypeScript SDK, web dashboard, examples (vesting, DCA, oracle trigger, subscriptions)~~ (v0.3), job management CLI, React hooks, docs site
 - [ ] **M6: Mainnet.** Invariant/fuzz testing, threat model, external audit
 
 See the [changelog](CHANGELOG.md) for what shipped in each release. Open work is tracked in [issues](https://github.com/sorocon-labs/sorocron/issues), labelled by area and complexity.

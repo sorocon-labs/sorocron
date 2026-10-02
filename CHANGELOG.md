@@ -2,6 +2,26 @@
 
 All notable changes to SoroCron are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Contract error codes and event fields are part of the public interface; changes to them are called out explicitly.
 
+## [0.3.0] - Unreleased
+
+### Added
+- **`update_job`**: owners change a job's function, args, interval, fee, `max_runs`, `end_at` and resolver; balance and `next_run` are kept. ([#10](https://github.com/sorocon-labs/sorocron/issues/10))
+- **`create_jobs`**: register up to 20 jobs with a single token transfer, all or nothing. ([#64](https://github.com/sorocon-labs/sorocron/issues/64))
+- **`execute_batch`**: keepers run up to 20 jobs per transaction; jobs that aren't due or whose target fails are skipped instead of reverting the batch, and fees are paid in one transfer. ([#33](https://github.com/sorocon-labs/sorocron/issues/33))
+- **`upgrade` and `version`**: admin-gated code upgrades that keep storage and address; `version()` returns the interface version (3). ([#11](https://github.com/sorocon-labs/sorocron/issues/11))
+- **`@sorocron/sdk`** (`packages/sdk`): typed TypeScript client, argument builders, schedule helpers and `SoroCronError`. ([#27](https://github.com/sorocon-labs/sorocron/issues/27))
+- **Web dashboard** (`app/`): browse jobs, schedule and manage them with Freighter, stake as a keeper. Deployed to GitHub Pages from `main`. ([#28](https://github.com/sorocon-labs/sorocron/issues/28))
+- **Keeper observability**: Prometheus `/metrics`, `/healthz` liveness endpoint, `LOG_FORMAT=json`, Docker `HEALTHCHECK`, clean SIGTERM shutdown. ([#25](https://github.com/sorocon-labs/sorocron/issues/25), [#73](https://github.com/sorocon-labs/sorocron/issues/73))
+
+### Changed
+- soroban-sdk 27 → 28. Contract WASM is now built with `stellar contract build` (Stellar CLI v25.2+); CI installs it with `stellar/stellar-cli`.
+- Target calls go through the executor's `try_execute`: a failing target now returns `TargetFailed` instead of the target's own error, and nothing is written.
+
+### Interface
+- New errors: `TargetFailed` (23), `InvalidBatchSize` (24), `LengthMismatch` (25).
+- New events: `JobUpdated`, `Upgraded`.
+- New type: `JobUpdate`. Storage layout is unchanged from v0.2.0, but the testnet deployment predates several v0.2.x additions and should be redeployed.
+
 ## [0.2.0] - 2026-09-15
 
 ### Added
@@ -30,5 +50,6 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - TypeScript keeper node, testnet deploy script and end-to-end demo.
 - Architecture and security documentation, CI (fmt, clippy, tests, WASM build).
 
+[0.3.0]: https://github.com/sorocon-labs/sorocron/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/sorocon-labs/sorocron/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sorocon-labs/sorocron/releases/tag/v0.1.0
