@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { SoroCron, TESTNET, type Config, type Job, type Keeper } from "@sorocron/sdk";
-import { signTransaction } from "./wallet";
+import { signTransaction } from "@stellar/freighter-api";
 
 export const NETWORK = TESTNET;
 const REFRESH_MS = 15_000;
@@ -10,6 +10,7 @@ export interface RegistryState {
   config?: Config;
   version?: number;
   jobs: Job[];
+  /** `undefined` while unknown or without a wallet, `null` when not a keeper. */
   keeper?: Keeper | null;
   loading: boolean;
   error?: string;
@@ -17,11 +18,13 @@ export interface RegistryState {
   refresh: () => Promise<void>;
 }
 
+const RegistryContext = createContext<RegistryState | null>(null);
+
 /**
- * Connects to the registry (read-only, or signing as `publicKey`) and keeps
- * config, jobs and the connected keeper's record fresh.
+ * One connection and one polling loop for the whole app, so every page sees
+ * the same snapshot and refreshes together after a transaction.
  */
-export function useRegistry(publicKey?: string): RegistryState {
+export function RegistryProvider({ account, children }: { account?: string; children: ReactNode }) {
   const [cron, setCron] = useState<SoroCron>();
   const [config, setConfig] = useState<Config>();
   const [version, setVersion] = useState<number>();
@@ -34,13 +37,17 @@ export function useRegistry(publicKey?: string): RegistryState {
 
   useEffect(() => {
     let cancelled = false;
-    SoroCron.connect({ network: NETWORK, publicKey, signTransaction: publicKey ? signTransaction : undefined })
+    SoroCron.connect({ network: NETWORK, publicKey: account, signTransaction: account ? signTransaction : undefined })
       .then((client) => !cancelled && setCron(client))
-      .catch((err) => !cancelled && setError(describe(err)));
+      .catch((err) => {
+        if (cancelled) return;
+        setError(describe(err));
+        setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [publicKey]);
+  }, [account]);
 
   const refresh = useCallback(async () => {
     if (!cron || inFlight.current) return;
@@ -50,12 +57,12 @@ export function useRegistry(publicKey?: string): RegistryState {
         cron.config(),
         cron.allJobs(),
         cron.version(),
-        publicKey ? cron.getKeeper(publicKey) : Promise.resolve(undefined),
+        account ? cron.getKeeper(account) : Promise.resolve(undefined),
       ]);
       setConfig(nextConfig);
       setJobs(nextJobs);
       setVersion(nextVersion);
-      setKeeper(publicKey ? (nextKeeper ?? null) : undefined);
+      setKeeper(account ? (nextKeeper ?? null) : undefined);
       setError(undefined);
       setUpdatedAt(Date.now());
     } catch (err) {
@@ -64,7 +71,7 @@ export function useRegistry(publicKey?: string): RegistryState {
       inFlight.current = false;
       setLoading(false);
     }
-  }, [cron, publicKey]);
+  }, [cron, account]);
 
   useEffect(() => {
     if (!cron) return;
@@ -73,7 +80,17 @@ export function useRegistry(publicKey?: string): RegistryState {
     return () => clearInterval(timer);
   }, [cron, refresh]);
 
-  return { cron, config, version, jobs, keeper, loading, error, updatedAt, refresh };
+  return (
+    <RegistryContext.Provider value={{ cron, config, version, jobs, keeper, loading, error, updatedAt, refresh }}>
+      {children}
+    </RegistryContext.Provider>
+  );
+}
+
+export function useRegistry(): RegistryState {
+  const ctx = useContext(RegistryContext);
+  if (!ctx) throw new Error("useRegistry outside RegistryProvider");
+  return ctx;
 }
 
 /** Unix seconds, ticking once a second, for countdowns. */

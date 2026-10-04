@@ -1,179 +1,291 @@
-import { useCallback, useEffect, useState } from "react";
-import { formatAmount, jobStatus, type Sent } from "@sorocron/sdk";
-import { CreateJobView } from "./CreateJobView";
-import { JobsView } from "./JobsView";
-import { KeeperView } from "./KeeperView";
-import { Addr, Stat, Toasts, short, type Toast } from "./ui";
-import { NETWORK, describe, useNow, useRegistry } from "./useRegistry";
-import { connectFreighter } from "./wallet";
-
-/** Sends a transaction with toasts and a refresh; resolves true on success. */
-export type Run = (label: string, send: () => Promise<Sent<unknown>>) => Promise<boolean>;
-
-type Tab = "jobs" | "schedule" | "keeper";
-const TABS: [Tab, string][] = [
-  ["jobs", "Jobs"],
-  ["schedule", "Schedule"],
-  ["keeper", "Keepers"],
-];
-
-function tabFromHash(): Tab {
-  const hash = window.location.hash.slice(1);
-  return TABS.some(([t]) => t === hash) ? (hash as Tab) : "jobs";
-}
+import { useEffect, useRef, useState } from "react";
+import { formatAmount, jobStatus } from "@sorocron/sdk";
+import { Icon, Logo, type IconName } from "./components/Icon";
+import { Button, ToastProvider, short, useToast } from "./components/ui";
+import { ConnectModal } from "./modals";
+import { JobDetail } from "./pages/JobDetail";
+import { Jobs, MyJobs } from "./pages/Jobs";
+import { Keeper } from "./pages/Keeper";
+import { NewJob } from "./pages/NewJob";
+import { Overview } from "./pages/Overview";
+import { Registry } from "./pages/Registry";
+import { Link, useRoute, type Route } from "./router";
+import { RegistryProvider, useNow, useRegistry } from "./state/registry";
+import { WalletProvider, useWallet } from "./state/wallet";
 
 export default function App() {
-  const [account, setAccount] = useState<string>();
-  const [tab, setTab] = useState<Tab>(tabFromHash);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [busy, setBusy] = useState(false);
-  const registry = useRegistry(account);
-  const now = useNow();
-
-  useEffect(() => {
-    const onHash = () => setTab(tabFromHash());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-
-  const toast = useCallback((t: Omit<Toast, "id">) => {
-    const id = Date.now() + Math.random();
-    setToasts((all) => [...all.slice(-3), { ...t, id }]);
-    setTimeout(() => setToasts((all) => all.filter((x) => x.id !== id)), t.kind === "err" ? 12_000 : 8_000);
-  }, []);
-
-  const connect = useCallback(async () => {
-    try {
-      setAccount(await connectFreighter(NETWORK.networkPassphrase));
-    } catch (err) {
-      toast({ kind: "err", text: describe(err) });
-    }
-  }, [toast]);
-
-  const run: Run = useCallback(
-    async (label, send) => {
-      setBusy(true);
-      toast({ kind: "info", text: "Confirm in Freighter…" });
-      try {
-        const { hash } = await send();
-        toast({ kind: "ok", text: label, hash });
-        await registry.refresh();
-        return true;
-      } catch (err) {
-        toast({ kind: "err", text: describe(err) });
-        return false;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [registry, toast],
+  return (
+    <ToastProvider>
+      <WalletProvider>
+        <WalletBoundRegistry />
+      </WalletProvider>
+    </ToastProvider>
   );
+}
 
-  const { jobs, config } = registry;
+function WalletBoundRegistry() {
+  const { account } = useWallet();
+  return (
+    <RegistryProvider account={account}>
+      <Shell />
+    </RegistryProvider>
+  );
+}
+
+interface NavItem {
+  route: Route;
+  label: string;
+  icon: IconName;
+  match: Route["name"][];
+}
+
+const NAV: { heading: string; items: NavItem[] }[] = [
+  {
+    heading: "Explore",
+    items: [
+      { route: { name: "overview" }, label: "Overview", icon: "overview", match: ["overview"] },
+      { route: { name: "jobs" }, label: "All jobs", icon: "jobs", match: ["jobs", "job"] },
+    ],
+  },
+  {
+    heading: "Manage",
+    items: [
+      { route: { name: "my-jobs" }, label: "My jobs", icon: "user", match: ["my-jobs"] },
+      { route: { name: "new" }, label: "New job", icon: "plus", match: ["new"] },
+    ],
+  },
+  {
+    heading: "Network",
+    items: [
+      { route: { name: "keeper" }, label: "Keeper", icon: "keeper", match: ["keeper"] },
+      { route: { name: "registry" }, label: "Registry", icon: "registry", match: ["registry"] },
+    ],
+  },
+];
+
+function Shell() {
+  const route = useRoute();
+  const { error, refresh, jobs } = useRegistry();
+  const { connectOpen, closeConnect } = useWallet();
+  const [drawer, setDrawer] = useState(false);
+  const now = useNow();
   const due = jobs.filter((j) => jobStatus(j, now) === "due").length;
-  const escrow = jobs.reduce((sum, j) => sum + j.balance, 0n);
+
+  useEffect(() => setDrawer(false), [route]);
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrawer(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawer]);
 
   return (
-    <div className={`app ${busy ? "busy" : ""}`}>
-      <header className="top">
-        <a className="brand" href="#jobs">
-          <svg viewBox="0 0 32 32" aria-hidden="true">
-            <circle cx="16" cy="16" r="13" />
-            <path d="M16 9v7l5 3" />
-          </svg>
-          SoroCron
-        </a>
-        <nav className="tabs">
-          {TABS.map(([value, label]) => (
-            <a key={value} href={`#${value}`} className={tab === value ? "active" : ""} aria-current={tab === value ? "page" : undefined}>
-              {label}
-            </a>
-          ))}
-        </nav>
-        <div className="wallet">
-          <span className="network">Testnet</span>
-          {account ? (
-            <span className="account" title={account}>
-              {short(account)}
-            </span>
-          ) : (
-            <button type="button" className="btn btn-primary" onClick={connect}>
-              Connect
-            </button>
-          )}
-        </div>
+    <div className="shell">
+      <a className="skip" href="#main">
+        Skip to content
+      </a>
+      <div className="ambient" aria-hidden="true" />
+
+      <header className="mobilebar">
+        <button type="button" className="icon-btn" aria-label="Open navigation" aria-expanded={drawer} onClick={() => setDrawer(true)}>
+          <Icon name="menu" />
+        </button>
+        <Link to={{ name: "overview" }} className="brand">
+          <Logo /> SoroCron
+        </Link>
+        <span className="net-dot" aria-label="Testnet" />
       </header>
 
-      <main>
-        <section className="hero">
-          <div>
-            <h1>Cron for Soroban contracts</h1>
-            <p>
-              Schedule any contract call, prepay a fee per run, and staked keepers execute it on time. No servers to run,
-              no single point of failure.
-            </p>
-          </div>
-          <div className="stats">
-            <Stat label="Live jobs" value={registry.loading ? "…" : jobs.length} />
-            <Stat label="Due now" value={registry.loading ? "…" : due} />
-            <Stat label="Escrowed" value={registry.loading ? "…" : `${formatAmount(escrow)} XLM`} />
-            <Stat
-              label="Registry"
-              value={config ? (config.paused ? "Paused" : "Running") : "…"}
-              hint={
-                <>
-                  <Addr value={registry.cron?.contractId ?? NETWORK.contracts.registry} />
-                  {registry.version ? ` · v${registry.version}` : ""}
-                </>
-              }
-            />
-          </div>
-        </section>
+      {drawer && <div className="drawer-scrim" onClick={() => setDrawer(false)} />}
+      <aside className={`sidebar ${drawer ? "open" : ""}`} aria-label="Primary">
+        <div className="sidebar-top">
+          <Link to={{ name: "overview" }} className="brand">
+            <Logo /> SoroCron
+          </Link>
+          <button type="button" className="icon-btn drawer-close" aria-label="Close navigation" onClick={() => setDrawer(false)}>
+            <Icon name="close" />
+          </button>
+        </div>
 
-        {registry.error && (
+        <nav className="nav">
+          {NAV.map((group) => (
+            <div key={group.heading} className="nav-group">
+              <div className="nav-heading">{group.heading}</div>
+              {group.items.map((item) => {
+                const active = item.match.includes(route.name);
+                return (
+                  <Link key={item.label} to={item.route} className={`nav-item ${active ? "active" : ""}`} aria-current={active ? "page" : undefined}>
+                    <Icon name={item.icon} size={17} />
+                    <span>{item.label}</span>
+                    {item.route.name === "keeper" && due > 0 && <span className="nav-count">{due}</span>}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <div className="sidebar-foot">
+          <div className="network-row">
+            <span className="net-dot" />
+            <span>Testnet</span>
+            <ThemeToggle />
+          </div>
+          <WalletCard />
+        </div>
+      </aside>
+
+      <main id="main" className="main" tabIndex={-1}>
+        {error && (
           <div className="banner" role="alert">
-            Couldn't reach the registry: {registry.error}{" "}
-            <button type="button" className="link" onClick={() => void registry.refresh()}>
+            <Icon name="alert" size={16} />
+            <span>Couldn't reach the registry: {error}</span>
+            <button type="button" className="link-btn" onClick={() => void refresh()}>
               Retry
             </button>
           </div>
         )}
-
-        {tab === "jobs" && (
-          <JobsView jobs={jobs} now={now} account={account} cron={registry.cron} run={run} loading={registry.loading} />
-        )}
-        {tab === "schedule" && (
-          <CreateJobView cron={registry.cron} config={config} account={account} connect={connect} run={run} />
-        )}
-        {tab === "keeper" && (
-          <KeeperView
-            cron={registry.cron}
-            config={config}
-            keeper={registry.keeper}
-            jobs={jobs}
-            now={now}
-            account={account}
-            connect={connect}
-            run={run}
-          />
-        )}
+        <div className="page" key={route.name === "job" ? `job-${route.id}` : route.name}>
+          <Page route={route} />
+        </div>
       </main>
 
-      <footer className="foot">
-        <span>Open source, MIT licensed.</span>
-        <a href="https://github.com/sorocon-labs/sorocron" target="_blank" rel="noreferrer">
-          GitHub
-        </a>
-        <a href="https://github.com/sorocon-labs/sorocron/blob/main/docs/security.md" target="_blank" rel="noreferrer">
-          Security model
-        </a>
-        <a href="https://github.com/sorocon-labs/sorocron/tree/main/packages/sdk" target="_blank" rel="noreferrer">
-          TypeScript SDK
-        </a>
-        {registry.updatedAt && <span className="muted">Updated {new Date(registry.updatedAt).toLocaleTimeString()}</span>}
-      </footer>
-
-      <Toasts toasts={toasts} dismiss={(id) => setToasts((all) => all.filter((t) => t.id !== id))} />
+      <ConnectModal open={connectOpen} onClose={closeConnect} />
     </div>
+  );
+}
+
+function Page({ route }: { route: Route }) {
+  switch (route.name) {
+    case "overview":
+      return <Overview />;
+    case "jobs":
+      return <Jobs />;
+    case "job":
+      return <JobDetail id={route.id} />;
+    case "my-jobs":
+      return <MyJobs />;
+    case "new":
+      return <NewJob />;
+    case "keeper":
+      return <Keeper />;
+    case "registry":
+      return <Registry />;
+    default:
+      return (
+        <div className="notfound">
+          <h1>Page not found</h1>
+          <Link to={{ name: "overview" }} className="btn btn-secondary">
+            Go to overview
+          </Link>
+        </div>
+      );
+  }
+}
+
+function WalletCard() {
+  const { account, promptConnect, disconnect } = useWallet();
+  const { keeper } = useRegistry();
+  const toast = useToast();
+  const [menu, setMenu] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setMenu(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  if (!account) {
+    return (
+      <Button variant="primary" icon="wallet" className="wallet-connect" onClick={promptConnect}>
+        Connect wallet
+      </Button>
+    );
+  }
+
+  return (
+    <div className="wallet" ref={ref}>
+      <button type="button" className="wallet-btn" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+        <span className="avatar" aria-hidden="true">
+          {account.slice(1, 3)}
+        </span>
+        <span className="wallet-text">
+          <span className="mono">{short(account, 4, 4)}</span>
+          <small>{keeper ? `Keeper · ${formatAmount(keeper.stake)} XLM staked` : "Freighter"}</small>
+        </span>
+        <Icon name="chevronDown" size={15} />
+      </button>
+      {menu && (
+        <div className="menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              void navigator.clipboard?.writeText(account).then(() => toast("ok", "Address copied"));
+              setMenu(false);
+            }}
+          >
+            <Icon name="copy" size={16} /> Copy address
+          </button>
+          <a role="menuitem" href={`https://stellar.expert/explorer/testnet/account/${account}`} target="_blank" rel="noreferrer" onClick={() => setMenu(false)}>
+            <Icon name="external" size={16} /> View on explorer
+          </a>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              disconnect();
+              setMenu(false);
+            }}
+          >
+            <Icon name="logout" size={16} /> Disconnect
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type Theme = "light" | "dark";
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      const saved = localStorage.getItem("sorocron.theme");
+      if (saved === "light" || saved === "dark") return saved;
+    } catch {
+      // ignore
+    }
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  const next = theme === "dark" ? "light" : "dark";
+  return (
+    <button
+      type="button"
+      className="icon-btn icon-btn-xs theme-toggle"
+      aria-label={`Switch to ${next} theme`}
+      onClick={() => {
+        setTheme(next);
+        try {
+          localStorage.setItem("sorocron.theme", next);
+        } catch {
+          // ignore
+        }
+      }}
+    >
+      <Icon name={theme === "dark" ? "sun" : "moon"} size={15} />
+    </button>
   );
 }
