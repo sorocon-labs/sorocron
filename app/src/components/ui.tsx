@@ -280,7 +280,20 @@ export function Skeleton({ rows = 3, height = 52 }: { rows?: number; height?: nu
   );
 }
 
-export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: ReactNode; title: string; description?: ReactNode; actions?: ReactNode }) {
+export function PageHeader({
+  eyebrow,
+  title,
+  description,
+  actions,
+  hideActionsOnMobile = false,
+}: {
+  eyebrow?: ReactNode;
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+  /** For actions that phones reach another way (tab bar, sticky action bar). */
+  hideActionsOnMobile?: boolean;
+}) {
   return (
     <header className="page-head">
       <div>
@@ -288,7 +301,7 @@ export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?:
         <h1>{title}</h1>
         {description && <p>{description}</p>}
       </div>
-      {actions && <div className="page-actions">{actions}</div>}
+      {actions && <div className={`page-actions ${hideActionsOnMobile ? "desktop-only" : ""}`}>{actions}</div>}
     </header>
   );
 }

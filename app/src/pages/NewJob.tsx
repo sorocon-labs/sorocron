@@ -189,7 +189,23 @@ export function NewJob() {
 
   return (
     <>
-      <PageHeader title="New job" description="Schedule a contract call. Keepers run it on time and are paid from the deposit." />
+      <div className="desktop-only">
+        <PageHeader title="New job" description="Schedule a contract call. Keepers run it on time and are paid from the deposit." />
+      </div>
+
+      <div className="wizard-progress">
+        <div className="wizard-progress-text">
+          <span>
+            Step {step + 1} of {STEPS.length}
+          </span>
+          <strong>{STEPS[step].title}</strong>
+        </div>
+        <div className="wizard-bars" aria-hidden="true">
+          {STEPS.map((s, i) => (
+            <span key={s.key} className={i <= step ? "on" : ""} />
+          ))}
+        </div>
+      </div>
 
       <div className="wizard">
         <nav className="stepper" aria-label="Steps">

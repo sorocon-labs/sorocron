@@ -2,12 +2,13 @@ import { useState } from "react";
 import { formatAmount, formatDuration, jobStatus, runsRemaining, type Job } from "@sorocron/sdk";
 import { Icon } from "../components/Icon";
 import { Address, Badge, Button, Card, Empty, Facts, Meter, PageHeader, Skeleton, StatusBadge, relative } from "../components/ui";
+import { Modal } from "../components/Modal";
 import { AmountModal, ConfirmModal } from "../modals";
 import { Link, navigate } from "../router";
 import { useNow, useRegistry } from "../state/registry";
 import { useWallet } from "../state/wallet";
 
-type Dialog = "fund" | "withdraw" | "pause" | "cancel" | null;
+type Dialog = "fund" | "withdraw" | "pause" | "cancel" | "manage" | null;
 
 export function JobDetail({ id }: { id: bigint }) {
   const { jobs, loading, cron } = useRegistry();
@@ -57,6 +58,7 @@ export function JobDetail({ id }: { id: bigint }) {
   return (
     <>
       <PageHeader
+        hideActionsOnMobile
         eyebrow={crumbs}
         title={`Job #${job.id}`}
         description={
@@ -142,6 +144,45 @@ export function JobDetail({ id }: { id: bigint }) {
         </Card>
 
       </div>
+
+      <div className="action-bar">
+        <Button variant="primary" icon="coin" className="grow-btn" onClick={() => requireWallet("fund")}>
+          Fund job
+        </Button>
+        {isOwner && <Button icon="dots" aria-label="Manage job" onClick={() => setDialog("manage")} />}
+      </div>
+
+      <Modal open={dialog === "manage"} onClose={() => setDialog(null)} title={`Manage job #${job.id}`} sheet>
+        <div className="sheet-section sheet-links">
+          <button type="button" className="sheet-row" disabled={job.balance === 0n} onClick={() => setDialog("withdraw")}>
+            <span className="choice-icon">
+              <Icon name="arrowLeft" size={17} />
+            </span>
+            <span className="sheet-row-text">
+              <strong>Withdraw funds</strong>
+              <small>Move part of the balance back to you</small>
+            </span>
+          </button>
+          <button type="button" className="sheet-row" onClick={() => setDialog("pause")}>
+            <span className="choice-icon">
+              <Icon name={job.active ? "pause" : "play"} size={17} />
+            </span>
+            <span className="sheet-row-text">
+              <strong>{job.active ? "Pause job" : "Resume job"}</strong>
+              <small>{job.active ? "Keepers stop running it until you resume" : "Keepers run it again from its next time"}</small>
+            </span>
+          </button>
+          <button type="button" className="sheet-row danger" onClick={() => setDialog("cancel")}>
+            <span className="choice-icon">
+              <Icon name="trash" size={17} />
+            </span>
+            <span className="sheet-row-text">
+              <strong>Cancel and refund</strong>
+              <small>Delete the job and refund {formatAmount(job.balance)} XLM</small>
+            </span>
+          </button>
+        </div>
+      </Modal>
 
       {cron && (
         <>

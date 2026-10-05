@@ -96,6 +96,7 @@ export function Jobs() {
   return (
     <>
       <PageHeader
+        hideActionsOnMobile
         title="Jobs"
         description="Every live job on the registry. Select one to see its schedule, funding and call."
         actions={
@@ -124,7 +125,7 @@ export function MyJobs() {
 
   return (
     <>
-      <PageHeader title="My jobs" description="Jobs owned by your connected account." actions={account && newJob} />
+      <PageHeader hideActionsOnMobile title="My jobs" description="Jobs owned by your connected account." actions={account && newJob} />
       {!account ? (
         <section className="card">
           <Empty

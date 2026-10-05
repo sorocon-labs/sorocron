@@ -22,6 +22,7 @@ export function Overview() {
   return (
     <>
       <PageHeader
+        hideActionsOnMobile
         eyebrow="Stellar testnet"
         title="Overview"
         description="Scheduled contract calls on Soroban, executed by staked keepers and paid per run."
@@ -35,7 +36,7 @@ export function Overview() {
       <div className="stats-row reveal-group">
         <Stat icon="jobs" label="Live jobs" value={loading ? "—" : jobs.length} />
         <Stat icon="clock" label="Due now" value={loading ? "—" : due} hint={due ? "Waiting for a keeper" : "All caught up"} />
-        <Stat icon="coin" label="Escrowed" value={loading ? "—" : `${formatAmount(escrow)}`} hint="XLM held for future runs" />
+        <Stat icon="coin" label="Escrowed" value={loading ? "—" : `${formatAmount(escrow)} XLM`} hint="Held for future runs" />
         <Stat icon="alert" label="Need attention" value={loading ? "—" : attention} hint="Out of funds or expired" />
       </div>
 

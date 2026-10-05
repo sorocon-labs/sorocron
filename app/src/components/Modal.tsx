@@ -19,6 +19,7 @@ export function Modal({
   footer,
   locked = false,
   size = "md",
+  sheet = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,6 +29,8 @@ export function Modal({
   footer?: ReactNode;
   locked?: boolean;
   size?: "sm" | "md" | "lg";
+  /** Always presented as a bottom sheet (used for phone-only menus). */
+  sheet?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -44,7 +47,9 @@ export function Modal({
     document.body.style.overflow = "hidden";
 
     const focusFirst = () => {
-      const first = panel.current?.querySelector<HTMLElement>("[data-autofocus]") ?? panel.current?.querySelector<HTMLElement>(FOCUSABLE);
+      // Focus the field marked for it, or else the dialog itself, so a close
+      // button doesn't open with a focus ring.
+      const first = panel.current?.querySelector<HTMLElement>("[data-autofocus]");
       (first ?? panel.current)?.focus();
     };
     requestAnimationFrame(focusFirst);
@@ -78,11 +83,11 @@ export function Modal({
 
   if (!open) return null;
   return createPortal(
-    <div className="modal-root">
+    <div className={`modal-root ${sheet ? "is-sheet" : ""}`}>
       <div className="modal-scrim" onClick={() => !locked && onClose()} />
       <div
         ref={panel}
-        className={`modal modal-${size}`}
+        className={`modal modal-${size} ${sheet ? "modal-sheet" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

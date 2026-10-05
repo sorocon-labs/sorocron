@@ -82,8 +82,10 @@ export function Keeper() {
                     #{job.id.toString()}
                   </Link>
                   <span className="mono grow">{job.function}</span>
-                  <span className="muted-cell when">due {relative(job.next_run, now)}</span>
-                  <span className="mono">{formatAmount(job.fee_per_run)} XLM</span>
+                  <span className="queue-meta">
+                    <span className="muted-cell when">due {relative(job.next_run, now)}</span>
+                    <span className="mono">{formatAmount(job.fee_per_run)} XLM</span>
+                  </span>
                   <Button
                     size="sm"
                     icon="bolt"
