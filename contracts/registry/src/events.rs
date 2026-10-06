@@ -25,6 +25,7 @@ pub struct JobFunded {
     pub balance: i128,
 }
 
+/// Receipt for every run, successful or not.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JobExecuted {
@@ -32,12 +33,45 @@ pub struct JobExecuted {
     pub job_id: u64,
     #[topic]
     pub keeper: Address,
+    /// Whether the target call succeeded. A failed run is still charged:
+    /// the keeper did the work and the schedule advances.
+    pub success: bool,
+    /// Total fee charged to the job for this run.
     pub fee: i128,
+    /// Part of `fee` sent to the treasury; the keeper received the rest.
+    pub protocol_fee: i128,
     pub run: u32,
     pub next_run: u64,
-    /// sha256 of the XDR-serialized return value of the target call.
-    /// Lets indexers verify a run's outcome without re-simulating it.
+    /// Seconds between the run becoming due and this execution.
+    pub lateness: u64,
+    /// Consecutive failures after this run (`0` after a success).
+    pub failures: u32,
+    /// sha256 of the XDR-serialized return value (or error) of the target
+    /// call. Lets indexers verify a run's outcome without re-simulating it.
     pub result_hash: BytesN<32>,
+}
+
+/// A job paused itself after `max_failures` consecutive failed runs.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobDeactivated {
+    #[topic]
+    pub job_id: u64,
+    pub failures: u32,
+}
+
+/// An assigned keeper missed its window and another keeper ran the job.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeeperSlashed {
+    #[topic]
+    pub keeper: Address,
+    pub job_id: u64,
+    pub amount: i128,
+    /// Stake left after slashing.
+    pub remaining: i128,
+    /// Keeper that ran the job and received the slashed amount.
+    pub beneficiary: Address,
 }
 
 #[contractevent]
@@ -165,4 +199,38 @@ pub struct JobUpdated {
 pub struct Upgraded {
     pub wasm_hash: BytesN<32>,
     pub previous_version: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TargetHaltSet {
+    #[topic]
+    pub target: Address,
+    pub halted: bool,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProtocolFeeSet {
+    pub protocol_fee_bps: u32,
+    pub treasury: Option<Address>,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MaxFailuresSet {
+    pub max_failures: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeeperWindowsSet {
+    pub grace_period: u64,
+    pub slash_bps: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnbondingEpochSet {
+    pub unbonding_epoch: u64,
 }

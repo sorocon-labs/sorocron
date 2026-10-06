@@ -16,7 +16,10 @@ use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
-use crate::{ensure_due, next_run_after, Error, Job};
+use crate::{
+    ensure_due, first_calendar_run, next_run_after, ramped_fee, schedule, split_fee, Error,
+    JobSpec, JobState, Schedule,
+};
 
 // ---------------------------------------------------------------------------
 // Strategies biased toward boundary values
@@ -112,23 +115,29 @@ fn due_case() -> impl Strategy<Value = DueCase> {
 
 /// A job that is due right now: active, funded, unlimited runs, no expiry.
 /// Tests overlay the fields under test on top of this baseline.
-fn sample_job(env: &Env) -> Job {
-    Job {
-        id: 0,
+fn sample_job(env: &Env) -> (JobSpec, JobState) {
+    let spec = JobSpec {
         owner: Address::generate(env),
         target: Address::generate(env),
         function: Symbol::new(env, "fuzz"),
         args: Vec::new(env),
         interval: 1,
-        next_run: 0,
+        schedule: Schedule::Interval,
         fee_per_run: 1,
-        balance: i128::MAX,
+        max_fee_per_run: 0,
         max_runs: 0,
-        runs: 0,
         end_at: 0,
         resolver: None,
+        keepers: None,
+    };
+    let state = JobState {
+        next_run: 0,
+        balance: i128::MAX,
+        runs: 0,
+        failures: 0,
         active: true,
-    }
+    };
+    (spec, state)
 }
 
 // ---------------------------------------------------------------------------
@@ -218,14 +227,14 @@ proptest! {
         (active, runs, max_runs, end_at, balance, fee_per_run, next_run, now) in due_case(),
     ) {
         let env = Env::default();
-        let mut job = sample_job(&env);
-        job.active = active;
-        job.runs = runs;
-        job.max_runs = max_runs;
-        job.end_at = end_at;
-        job.balance = balance;
-        job.fee_per_run = fee_per_run;
-        job.next_run = next_run;
+        let (mut spec, mut state) = sample_job(&env);
+        state.active = active;
+        state.runs = runs;
+        spec.max_runs = max_runs;
+        spec.end_at = end_at;
+        state.balance = balance;
+        spec.fee_per_run = fee_per_run;
+        state.next_run = next_run;
 
         let expected = if !active {
             Err(Error::JobPaused)
@@ -240,7 +249,7 @@ proptest! {
         } else {
             Ok(())
         };
-        prop_assert_eq!(ensure_due(&job, now), expected);
+        prop_assert_eq!(ensure_due(&spec, &state, now), expected);
     }
 
     /// Whatever `ensure_due` admits, `execute` must be able to pay for:
@@ -254,23 +263,23 @@ proptest! {
         fee_per_run in fee(),
     ) {
         let env = Env::default();
-        let mut job = sample_job(&env);
-        job.active = active;
-        job.runs = runs;
-        job.max_runs = max_runs;
-        job.end_at = end_at;
-        job.balance = balance;
-        job.fee_per_run = fee_per_run;
-        job.next_run = next_run;
+        let (mut spec, mut state) = sample_job(&env);
+        state.active = active;
+        state.runs = runs;
+        spec.max_runs = max_runs;
+        spec.end_at = end_at;
+        state.balance = balance;
+        spec.fee_per_run = fee_per_run;
+        state.next_run = next_run;
 
-        if ensure_due(&job, now).is_ok() {
-            let remaining = job.balance.checked_sub(job.fee_per_run);
+        if ensure_due(&spec, &state, now).is_ok() {
+            let remaining = state.balance.checked_sub(spec.fee_per_run);
             prop_assert!(
                 matches!(remaining, Some(paid) if paid >= 0),
                 "fee payment of {} from balance {} underflowed i128 \
                  despite ensure_due admitting the job",
-                job.fee_per_run,
-                job.balance
+                spec.fee_per_run,
+                state.balance
             );
         }
     }
@@ -281,10 +290,10 @@ proptest! {
     #[test]
     fn due_boundary_is_inclusive(next_run in 1..=u64::MAX, delta in -1i64..=1) {
         let env = Env::default();
-        let mut job = sample_job(&env);
-        job.next_run = next_run;
+        let (spec, mut state) = sample_job(&env);
+        state.next_run = next_run;
         let now = next_run.saturating_add_signed(delta);
-        prop_assert_eq!(ensure_due(&job, now).is_ok(), delta >= 0);
+        prop_assert_eq!(ensure_due(&spec, &state, now).is_ok(), delta >= 0);
     }
 
     /// The expiry boundary is exclusive: at `now == end_at` the job has
@@ -293,9 +302,116 @@ proptest! {
     #[test]
     fn expiry_boundary_is_exclusive(end_at in 1..=u64::MAX, delta in -1i64..=1) {
         let env = Env::default();
-        let mut job = sample_job(&env);
-        job.end_at = end_at;
+        let (mut spec, state) = sample_job(&env);
+        spec.end_at = end_at;
         let now = end_at.saturating_add_signed(delta);
-        prop_assert_eq!(ensure_due(&job, now).is_ok(), delta < 0);
+        prop_assert_eq!(ensure_due(&spec, &state, now).is_ok(), delta < 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v4 math: calendars, fee ramps, protocol fee split, unbonding epochs
+// ---------------------------------------------------------------------------
+
+/// A valid calendar schedule with its (weekday, hour, minute).
+fn calendar() -> impl Strategy<Value = (Schedule, Option<u32>, u32, u32)> {
+    (prop::option::of(0u32..7), 0u32..24, 0u32..60).prop_map(
+        |(weekday, hour, minute)| match weekday {
+            None => (Schedule::Daily(hour, minute), None, hour, minute),
+            Some(d) => (Schedule::Weekly(d, hour, minute), Some(d), hour, minute),
+        },
+    )
+}
+
+proptest! {
+    /// The first calendar run is the earliest matching wall-clock time at or
+    /// after `from`: never before it, less than one period after it, and on
+    /// the requested hour, minute and weekday.
+    #[test]
+    fn first_calendar_run_is_the_next_matching_time(
+        (cal, weekday, hour, minute) in calendar(),
+        from in 0u64..=4_000_000_000,
+    ) {
+        let period = schedule::calendar_period(&cal).unwrap();
+        let t = first_calendar_run(&cal, from);
+        prop_assert!(t >= from);
+        prop_assert!(t - from < period);
+        prop_assert_eq!((t % 86_400) / 3_600, hour as u64);
+        prop_assert_eq!((t % 3_600) / 60, minute as u64);
+        prop_assert_eq!(t % 60, 0);
+        if let Some(weekday) = weekday {
+            // Days since epoch + 3 makes Monday 0 (1970-01-01 was a Thursday).
+            prop_assert_eq!((t / 86_400 + 3) % 7, weekday as u64);
+        }
+    }
+
+    /// Rescheduling a calendar job after any delay lands on the same
+    /// wall-clock time again: grid alignment means calendar jobs never drift.
+    #[test]
+    fn calendar_jobs_never_drift(
+        (cal, _, _, _) in calendar(),
+        from in 0u64..=4_000_000_000,
+        delay in 0u64..=10_000_000,
+    ) {
+        let period = schedule::calendar_period(&cal).unwrap();
+        let first = first_calendar_run(&cal, from);
+        let now = first + delay;
+        let next = next_run_after(first, period, now);
+        prop_assert!(next > now);
+        prop_assert_eq!((next - first) % period, 0);
+    }
+
+    /// A ramped fee is never below the base fee, never above the ceiling,
+    /// never above the balance, and never decreases as the run gets later.
+    #[test]
+    fn ramped_fee_stays_within_bounds(
+        base in 1i128..=1_000_000_000,
+        extra in 0i128..=1_000_000_000,
+        interval in 1u64..=1_000_000,
+        late in 0u64..=2_000_000,
+        balance_slack in 0i128..=2_000_000_000,
+    ) {
+        let env = Env::default();
+        let (mut spec, mut state) = sample_job(&env);
+        spec.fee_per_run = base;
+        spec.max_fee_per_run = base + extra;
+        spec.interval = interval;
+        state.next_run = 1_000;
+        state.balance = base + balance_slack;
+
+        let fee = ramped_fee(&spec, &state, 1_000 + late);
+        prop_assert!(fee >= base);
+        prop_assert!(fee <= spec.max_fee_per_run);
+        prop_assert!(fee <= state.balance);
+        let later = ramped_fee(&spec, &state, 1_000 + late + 1);
+        prop_assert!(later >= fee);
+    }
+
+    /// The protocol fee split never creates or loses value and never takes
+    /// more than its share, even at the extremes of `i128`.
+    #[test]
+    fn split_fee_conserves_amount(amount in 0i128..=i128::MAX, bps in 0u32..=10_000) {
+        let (rest, share) = split_fee(amount, bps);
+        prop_assert_eq!(rest + share, amount);
+        prop_assert!(share >= 0 && rest >= 0);
+        prop_assert!(share <= amount / 10_000 * bps as i128 + bps as i128);
+    }
+
+    /// Everyone who starts unbonding in the same epoch is released at the
+    /// same moment, no earlier than the full unbonding period from now.
+    #[test]
+    fn unbonding_epochs_release_together(
+        epoch in 1u64..=1_000_000,
+        period in 0u64..=1_000_000,
+        start in 0u64..=1_000_000_000,
+        a in 0u64..=1_000_000,
+        b in 0u64..=1_000_000,
+    ) {
+        let epoch_start = start / epoch * epoch;
+        let t1 = epoch_start + a % epoch;
+        let t2 = epoch_start + b % epoch;
+        let r1 = schedule::unbonding_release(t1, period, epoch);
+        prop_assert_eq!(r1, schedule::unbonding_release(t2, period, epoch));
+        prop_assert!(r1 >= t1 + period);
     }
 }

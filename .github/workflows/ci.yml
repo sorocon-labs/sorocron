@@ -20,7 +20,15 @@ jobs:
       - uses: stellar/stellar-cli@v28.1.0
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
+      # Built before the tests: the upgrade test installs the real registry WASM.
+      - run: stellar contract build
       - run: cargo test
+      - name: Fee accounting invariant (issue #5)
+        # Random sequences of every registry operation; checks that escrow
+        # equals job balances plus stakes after each step.
+        run: cargo test -p sorocron-registry --release invariants
+        env:
+          PROPTEST_CASES: 1000
       - name: Fuzz schedule and fee math (issue #77)
         # Property tests over the registry's pure schedule calculations:
         # u64 timestamp edges, zero intervals, extreme fees. `cargo test`
@@ -29,7 +37,6 @@ jobs:
         run: cargo test -p sorocron-registry proptest
         env:
           PROPTEST_CASES: 2048
-      - run: stellar contract build
       - name: Enforce WASM size budget
         # Soroban rejects contracts over 64 KB; fail early with headroom.
         run: |

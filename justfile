@@ -36,3 +36,8 @@ keeper:
 # Run the web dashboard locally at http://localhost:5173.
 app:
     npm install && npm run dev
+
+# Measure what each contract call costs (see docs/costs.md).
+costs:
+    stellar contract build
+    cargo run -p sorocron-bench --release

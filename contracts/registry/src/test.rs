@@ -1,4 +1,6 @@
-use crate::{events, Error, JobParams, JobUpdate, SoroCron, SoroCronClient, MAX_BATCH, VERSION};
+use crate::{
+    events, Error, JobParams, JobUpdate, Schedule, SoroCron, SoroCronClient, MAX_BATCH, VERSION,
+};
 use soroban_sdk::testutils::Deployer as _;
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
@@ -11,12 +13,12 @@ use soroban_sdk::{
 use sorocron_executor::Executor;
 use sorocron_ttl_guardian::TtlGuardian;
 
-const MIN_STAKE: i128 = 1_000;
-const UNBONDING: u64 = 3_600;
-const START: u64 = 1_700_000_000;
-const FEE: i128 = 10;
-const INTERVAL: u64 = 60;
-const INITIAL_BALANCE: i128 = 1_000_000;
+pub(crate) const MIN_STAKE: i128 = 1_000;
+pub(crate) const UNBONDING: u64 = 3_600;
+pub(crate) const START: u64 = 1_700_000_000;
+pub(crate) const FEE: i128 = 10;
+pub(crate) const INTERVAL: u64 = 60;
+pub(crate) const INITIAL_BALANCE: i128 = 1_000_000;
 
 // ---------------------------------------------------------------------------
 // Mock contracts
@@ -69,25 +71,25 @@ impl MockResolver {
 // Helpers
 // ---------------------------------------------------------------------------
 
-struct Setup {
-    env: Env,
-    cron: SoroCronClient<'static>,
-    token: TokenClient<'static>,
-    sac: StellarAssetClient<'static>,
-    target: MockTargetClient<'static>,
-    admin: Address,
-    owner: Address,
-    keeper: Address,
+pub(crate) struct Setup {
+    pub(crate) env: Env,
+    pub(crate) cron: SoroCronClient<'static>,
+    pub(crate) token: TokenClient<'static>,
+    pub(crate) sac: StellarAssetClient<'static>,
+    pub(crate) target: MockTargetClient<'static>,
+    pub(crate) admin: Address,
+    pub(crate) owner: Address,
+    pub(crate) keeper: Address,
 }
 
-fn setup() -> Setup {
+pub(crate) fn setup() -> Setup {
     let s = setup_without_executor();
     let executor_id = s.env.register(Executor, (s.cron.address.clone(),));
     s.cron.set_executor(&executor_id);
     s
 }
 
-fn setup_without_executor() -> Setup {
+pub(crate) fn setup_without_executor() -> Setup {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(START);
@@ -130,7 +132,7 @@ fn setup_without_executor() -> Setup {
     }
 }
 
-fn params(s: &Setup) -> JobParams {
+pub(crate) fn params(s: &Setup) -> JobParams {
     let args: Vec<Val> = vec![&s.env, 1u32.into_val(&s.env)];
     JobParams {
         target: s.target.address.clone(),
@@ -142,10 +144,13 @@ fn params(s: &Setup) -> JobParams {
         max_runs: 0,
         end_at: 0,
         resolver: None,
+        schedule: Schedule::Interval,
+        max_fee_per_run: 0,
+        keepers: None,
     }
 }
 
-fn advance(env: &Env, seconds: u64) {
+pub(crate) fn advance(env: &Env, seconds: u64) {
     let now = env.ledger().timestamp();
     env.ledger().set_timestamp(now + seconds);
 }
@@ -546,7 +551,7 @@ fn jobs_by_owner_tracks_creation_and_cancellation() {
 
 /// Whether the registry emitted an event matching `expected` at any point
 /// during this test (unlike `last_event`, does not require it to be last).
-fn emitted(s: &Setup, expected: &soroban_sdk::xdr::ContractEvent) -> bool {
+pub(crate) fn emitted(s: &Setup, expected: &soroban_sdk::xdr::ContractEvent) -> bool {
     s.env
         .events()
         .all()
@@ -910,7 +915,11 @@ fn targets_cannot_use_registry_authority() {
             sub_invokes: &[],
         },
     }]);
-    assert!(s.cron.try_execute(&s.keeper, &malicious).is_err());
+    // The transfer fails inside the executor for lack of the registry's
+    // authority. Since v4 that failure is recorded on the job instead of
+    // reverting, so the run itself goes through.
+    s.cron.execute(&s.keeper, &malicious);
+    assert_eq!(s.cron.get_job(&malicious).unwrap().failures, 1);
 
     let other = TokenClient::new(&s.env, &other_token);
     assert_eq!(other.balance(&s.cron.address), 500);
@@ -1223,7 +1232,7 @@ fn pausing_missing_job_fails() {
 // ---------------------------------------------------------------------------
 
 /// Last event the registry emitted, as XDR, for comparison with `Event::to_xdr`.
-fn last_event(s: &Setup) -> soroban_sdk::xdr::ContractEvent {
+pub(crate) fn last_event(s: &Setup) -> soroban_sdk::xdr::ContractEvent {
     s.env
         .events()
         .all()
@@ -1284,13 +1293,17 @@ fn job_executed_event() {
     let expected = events::JobExecuted {
         job_id: id,
         keeper: s.keeper.clone(),
+        success: true,
         fee: FEE,
+        protocol_fee: 0,
         run: 1,
         next_run: START + INTERVAL,
+        lateness: 0,
+        failures: 0,
         result_hash,
     }
     .to_xdr(&s.env, &s.cron.address);
-    assert_eq!(last_event(&s), expected);
+    assert!(emitted(&s, &expected));
 }
 
 #[test]
@@ -1440,7 +1453,7 @@ fn create_jobs_rejects_bad_batch_shapes() {
 // Updating jobs
 // ---------------------------------------------------------------------------
 
-fn update_from(s: &Setup, job_id: u64) -> JobUpdate {
+pub(crate) fn update_from(s: &Setup, job_id: u64) -> JobUpdate {
     let job = s.cron.get_job(&job_id).unwrap();
     JobUpdate {
         function: job.function,
@@ -1450,6 +1463,9 @@ fn update_from(s: &Setup, job_id: u64) -> JobUpdate {
         max_runs: job.max_runs,
         end_at: job.end_at,
         resolver: job.resolver,
+        schedule: job.schedule,
+        max_fee_per_run: job.max_fee_per_run,
+        keepers: job.keepers,
     }
 }
 
@@ -1555,7 +1571,7 @@ fn job_updated_event() {
 // Batch execution and failing targets
 // ---------------------------------------------------------------------------
 
-fn failing_params(s: &Setup) -> JobParams {
+pub(crate) fn failing_params(s: &Setup) -> JobParams {
     let mut p = params(s);
     p.function = Symbol::new(&s.env, "fail");
     p.args = Vec::new(&s.env);
@@ -1563,18 +1579,21 @@ fn failing_params(s: &Setup) -> JobParams {
 }
 
 #[test]
-fn failing_target_reverts_execute_with_target_failed() {
+fn failing_target_is_charged_and_recorded() {
     let s = setup();
     let id = s.cron.create_job(&s.owner, &failing_params(&s), &100);
+    let keeper_before = s.token.balance(&s.keeper);
 
-    assert_eq!(
-        s.cron.try_execute(&s.keeper, &id),
-        Err(Ok(Error::TargetFailed))
-    );
+    s.cron.execute(&s.keeper, &id);
+
     let job = s.cron.get_job(&id).unwrap();
-    assert_eq!(job.runs, 0);
-    assert_eq!(job.balance, 100);
-    assert_eq!(s.cron.get_keeper(&s.keeper).unwrap().executions, 0);
+    assert_eq!(job.runs, 1);
+    assert_eq!(job.failures, 1);
+    assert_eq!(job.balance, 100 - FEE);
+    assert_eq!(job.next_run, START + INTERVAL);
+    assert!(job.active);
+    assert_eq!(s.token.balance(&s.keeper), keeper_before + FEE);
+    assert_eq!(s.cron.get_keeper(&s.keeper).unwrap().executions, 1);
 }
 
 #[test]
@@ -1594,11 +1613,13 @@ fn execute_batch_runs_due_jobs_and_skips_the_rest() {
         .cron
         .execute_batch(&s.keeper, &vec![&s.env, due, not_due, broken, 999, due_too]);
 
-    assert_eq!(ran, vec![&s.env, true, false, false, false, true]);
+    // The broken job runs too: its failure is recorded and charged.
+    assert_eq!(ran, vec![&s.env, true, false, true, false, true]);
     assert_eq!(s.target.count(), 2);
-    assert_eq!(s.token.balance(&s.keeper), keeper_before + 2 * FEE);
-    assert_eq!(s.cron.get_keeper(&s.keeper).unwrap().executions, 2);
-    assert_eq!(s.cron.get_job(&broken).unwrap().balance, 100);
+    assert_eq!(s.token.balance(&s.keeper), keeper_before + 3 * FEE);
+    assert_eq!(s.cron.get_keeper(&s.keeper).unwrap().executions, 3);
+    assert_eq!(s.cron.get_job(&broken).unwrap().balance, 100 - FEE);
+    assert_eq!(s.cron.get_job(&broken).unwrap().failures, 1);
     assert_eq!(s.cron.get_job(&not_due).unwrap().runs, 0);
 }
 

@@ -1,0 +1,11 @@
+[package]
+name = "sorocron-bench"
+description = "Resource cost benchmarks for the SoroCron contracts, run against the built WASM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

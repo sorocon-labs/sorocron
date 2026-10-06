@@ -37,30 +37,69 @@ sequenceDiagram
 
 | Key | Storage | Contents |
 |---|---|---|
-| `Config` | instance | admin, fee token, stake token, min stake, unbonding period, paused flag, executor, min interval, max args |
+| `Config` | instance | admin, tokens, min stake, unbonding period and epoch, paused flag, executor, min interval, max args, protocol fee and treasury, max failures, grace period, slash share |
 | `NextJobId` | instance | monotonically increasing job id counter |
 | `PendingAdmin` | instance | admin proposed via `propose_admin`, until accepted |
-| `Job(u64)` | persistent | owner, target, function, args, interval, next_run, fee_per_run, balance, max_runs, runs, end_at, resolver, active |
-| `Keeper(Address)` | persistent | stake, unbonding_at, executions |
+| `Job(u64)` | persistent | `JobSpec`: owner, target, function, args, interval, schedule, fees, max_runs, end_at, resolver, keeper allowlist |
+| `JobState(u64)` | persistent | `JobState`: next_run, balance, runs, consecutive failures, active |
+| `Keeper(Address)` | persistent | stake, unbonding_at, executions, total lateness, missed windows, slashed stake |
+| `ActiveKeepers` | persistent | keepers in the assigned-window rotation, in staking order (max 64) |
+| `HaltedTarget(Address)` | persistent | present while the admin has halted a target contract |
+
+A job is split in two entries so that a run rewrites only the small `JobState`, however large the job's arguments are. Before v4 every run rewrote the whole job; measured with `cargo run -p sorocron-bench`, `execute` now writes 15% fewer bytes for a one-argument job, the same amount for a job with 1 KB of arguments, and `execute_batch` of five jobs writes 41% less ([costs](costs.md)). Views return the combined `Job`.
 
 Every read and write of a persistent entry extends its TTL (30 days), so active jobs and keepers never get archived. The instance is extended to 7 days on every call.
 
 ## Scheduling
 
-- `next_run` starts at `max(start_at, now)`.
-- A job is **due** when `now >= next_run`, its balance covers one fee, `max_runs` isn't reached, `end_at` (if set) hasn't passed, and its resolver (if any) returns `true`.
-- After a run, `next_run = next_run + interval`. If keepers were offline long enough that this is already in the past, it becomes `now + interval` instead, so missed runs don't fire back-to-back.
-- `end_at` is an optional Unix timestamp (`0` means never) after which the job stops being due, even if it hasn't hit `max_runs` and its balance is still funded. Unlike `max_runs`, it expires by wall-clock time rather than by run count &mdash; useful for jobs tied to a calendar date, like a campaign that ends on a given day. Once `now >= end_at`, `execute` fails with `JobExpired`; the job can still be cancelled or have its balance withdrawn.
+- A job's `schedule` is `Interval` (every `interval` seconds), `Daily(hour, minute)` or `Weekly(weekday, hour, minute)` in UTC, with Monday as weekday `0`. Calendar schedules must pass `interval = 0`; their stored interval is a day or a week.
+- `next_run` starts at `max(start_at, now)`, or for calendar schedules at the first matching time at or after it.
+- A job is **due** when it is active, `max_runs` isn't reached, `end_at` (if set) hasn't passed, its balance covers one base fee, `now >= next_run`, its target isn't halted, and its resolver (if any) returns `true`.
+- After a run, `next_run` moves to the next point on the job's grid (`first_run + k * interval`) that is after `now`. Missed runs are skipped instead of firing back-to-back, and calendar jobs never drift: a daily 12:00 job stays at 12:00 however late a keeper was.
+- `end_at` is an optional Unix timestamp (`0` means never) after which the job stops being due. Once `now >= end_at`, `execute` fails with `JobExpired`; the job can still be cancelled or have its balance withdrawn.
+
+Computation is integer-only. The schedule math lives in `contracts/registry/src/schedule.rs` and is property-tested for midnight boundaries, weekday alignment, missed runs and `u64` overflow.
+
+### Fees
+
+- `fee_per_run` is charged for every run. With `max_fee_per_run` set, the fee rises linearly from `fee_per_run` when the run becomes due to `max_fee_per_run` once it is a full interval late, so time-sensitive jobs (liquidations, rebalances) pay more the longer they wait. It never exceeds the job's balance. `current_fee(job_id)` shows the fee right now.
+- With a protocol fee configured, `protocol_fee_bps` (at most 10%) of each fee goes to the treasury, rounded down; the keeper receives the rest.
 
 Time is measured with the ledger timestamp (seconds). Ledgers close about every 5 seconds, so that is the practical minimum resolution.
 
 ## Keepers
 
-- `stake` registers a keeper and adds stake. A keeper may execute while `stake >= min_stake` and it is not unbonding.
-- `begin_unbonding` immediately removes execution rights and starts a `unbonding_period` timer.
+- `stake` registers a keeper, adds stake and puts it in the assigned-window rotation (up to 64 keepers; later keepers can still run any job after its window). A keeper may execute while `stake >= min_stake` and it is not unbonding.
+- `begin_unbonding` immediately removes execution rights, takes the keeper out of the rotation and starts the unbonding timer. With an `unbonding_epoch` set, the timer starts when the current epoch ends, so every keeper unbonding in one epoch is released at the same moment; `withdraw_stakes(keepers)` lets anyone settle a whole epoch in one transaction, paying each keeper its own stake.
 - `withdraw_stake` returns the full stake after the timer ends.
+- `keeper_stats(keeper)` returns executions, average lateness (seconds between a run becoming due and the keeper running it), missed windows and stake lost to slashing. Lateness is stored as a running sum, so the record stays a fixed size.
 
-Execution is currently first-come-first-served: whichever keeper lands `execute` first gets the fee, and the others' transactions fail cheaply during simulation. Planned: rotating execution windows per keeper and slashing for missed windows (see the issue backlog).
+### Assigned windows and slashing
+
+First come, first served makes the fastest bot win every fee and wastes everyone else's simulations. With `set_keeper_windows(grace_period, slash_bps)`:
+
+1. Each run of each job has an assigned keeper, chosen by `sha256(job_id, runs) % n` over the job's keeper allowlist, or the rotation if it has none. `assigned_keeper(job_id)` shows it.
+2. For `grace_period` seconds after `next_run`, only the assigned keeper may execute (`NotAssignedKeeper` otherwise).
+3. After the window anyone may execute. If someone other than the assigned keeper does, the assigned keeper loses `slash_bps` (at most 10%) of its stake to the keeper that did the work, and its `missed` count goes up (`KeeperSlashed` event).
+4. An assigned keeper that can't execute (unbonding, or below `min_stake`, for example after being slashed) is skipped: the run is open to everyone and nobody is slashed for it.
+
+`grace_period = 0` (the default) keeps first come, first served.
+
+### Keeper allowlists
+
+A job may set `keepers` to at most 10 addresses. Only those keepers can execute it (`KeeperNotAllowed`), and its assigned windows rotate among them.
+
+## Failures and receipts
+
+The executor call is made with `try_execute`. If the target fails, the run still counts: the fee is charged, the schedule advances and the job's `failures` counter goes up. After `max_failures` consecutive failures (3 by default, `0` disables) the job pauses itself with a `JobDeactivated` event. A successful run resets the counter, and so does the owner resuming the job. See [security.md](security.md#failure-charging) for why failures are charged.
+
+Every run emits one `JobExecuted` receipt with the outcome (`success`), the total fee and protocol share, the run number, the next run, how late it ran, the failure count and a hash of the return value (or error). CPU and memory use aren't observable from inside a contract; keepers read them from the transaction result.
+
+## Circuit breakers
+
+- `set_paused(true)` stops all execution and deposits; exits keep working.
+- `set_target_halted(target, true)` stops every job calling one contract (`TargetHalted`) without touching the rest of the registry, for when a target is compromised. Owners can still withdraw and cancel.
+- Owners pause their own jobs with `set_job_active`.
 
 ## Resolvers
 
@@ -117,6 +156,12 @@ The test `guardian_job_keeps_target_contract_from_being_archived` runs this end 
 | 20 | `JobExpired` | `now >= end_at` |
 | 21 | `IntervalTooShort` | `interval` below the admin-configured `min_interval` |
 | 22 | `TooManyArgs` | `args` longer than the admin-configured `max_args` |
-| 23 | `TargetFailed` | The target call panicked or returned an error; nothing is written |
+| 23 | `TargetFailed` | Not returned since v4: failed runs are recorded instead (see Failures and receipts) |
 | 24 | `InvalidBatchSize` | `create_jobs` / `execute_batch` got 0 or more than 20 items |
 | 25 | `LengthMismatch` | `create_jobs` got different numbers of jobs and deposits |
+| 26 | `KeeperNotAllowed` | The job has a keeper allowlist and the caller isn't on it |
+| 27 | `NotAssignedKeeper` | Inside the grace period only the run's assigned keeper may execute |
+| 28 | `TargetHalted` | The admin halted every job calling this target |
+| 29 | `InvalidCalendar` | Calendar hour, minute or weekday out of range, or a calendar with a non-zero interval |
+| 30 | `InvalidSetting` | Protocol fee or slash share above 10%, fee ceiling below the base fee, or a protocol fee without a treasury |
+| 31 | `TooManyKeepers` | Keeper allowlist longer than 10 |
