@@ -13,13 +13,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^17.1.0",
-    "dotenv": "^17.4.2"
+    "@stellar/stellar-sdk": "^17.2.1",
+    "dotenv": "^18.0.5"
   },
   "devDependencies": {
-    "@types/node": "^26.5.1",
-    "tsx": "^4.23.13",
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^2.1.9"
+    "vitest": "^5.0.3"
   }
 }
