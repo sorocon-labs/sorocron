@@ -41,7 +41,7 @@ jobs:
         # A table of every contract's size against contracts/wasm-sizes.txt
         # in the job summary. Informational: compiler updates shift sizes by
         # a few bytes, so only the budget below fails the build.
-        run: scripts/contract-snapshots.sh --sizes >> "$GITHUB_STEP_SUMMARY"
+        run: bash scripts/contract-snapshots.sh --sizes >> "$GITHUB_STEP_SUMMARY"
       - name: Enforce WASM size budget
         # Soroban rejects contracts over 64 KB; fail early with headroom.
         run: |
@@ -58,7 +58,7 @@ jobs:
         # A renamed function, error code or event silently breaks keepers,
         # the SDK and the app. Snapshots live in contracts/interfaces; when a
         # change is intended, rerun scripts/contract-snapshots.sh and commit.
-        run: scripts/contract-snapshots.sh --check
+        run: bash scripts/contract-snapshots.sh --check
 
   coverage:
     name: Contract test coverage
