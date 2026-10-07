@@ -95,6 +95,7 @@ async function deploy(keypair: Keypair, wasmHash: string, args: Record<string, u
     wasmHash,
     format: "hex",
     rpcUrl: RPC_URL,
+    allowHttp: RPC_URL.startsWith("http://"),
     networkPassphrase: NETWORK_PASSPHRASE,
     publicKey: keypair.publicKey(),
     ...contract.basicNodeSigner(keypair, NETWORK_PASSPHRASE),

@@ -16,7 +16,6 @@ create-missing = false
 [output.html]
 site-url = "/sorocron/docs/"
 git-repository-url = "https://github.com/sorocon-labs/sorocron"
-git-repository-icon = "fa-github"
 default-theme = "light"
 preferred-dark-theme = "coal"
 additional-js = ["mermaid-init.js"]
