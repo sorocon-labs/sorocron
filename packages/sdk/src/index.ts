@@ -8,7 +8,20 @@ export {
   formatDuration,
   formatAmount,
   parseAmount,
+  schedule,
+  describeSchedule,
+  currentFee,
   type JobStatus,
 } from "./schedule.js";
+export {
+  fetchEvents,
+  toExecution,
+  leaderboard,
+  type RegistryEvent,
+  type EventPage,
+  type FetchEventsOptions,
+  type Execution,
+  type LeaderboardRow,
+} from "./events.js";
 export { TESTNET, type NetworkConfig } from "./networks.js";
-export type { Config, Job, JobParams, JobUpdate, Keeper } from "./types.js";
+export type { Config, Job, JobParams, JobState, JobUpdate, Keeper, KeeperStats, Schedule } from "./types.js";

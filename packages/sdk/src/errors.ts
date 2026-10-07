@@ -28,6 +28,13 @@ export const ERRORS = {
   23: ["TargetFailed", "The target contract call failed."],
   24: ["InvalidBatchSize", "A batch must contain between 1 and 20 items."],
   25: ["LengthMismatch", "Jobs and deposits must have the same length."],
+  26: ["KeeperNotAllowed", "This job only accepts keepers on its allowlist."],
+  27: ["NotAssignedKeeper", "Another keeper is assigned to this run until its window ends."],
+  28: ["TargetHalted", "The admin has halted jobs that call this contract."],
+  29: ["InvalidCalendar", "Calendar time out of range, or a calendar schedule with an interval."],
+  30: ["InvalidSetting", "A fee or share is above its maximum, or a fee ceiling is below the base fee."],
+  31: ["TooManyKeepers", "A job's keeper allowlist can have at most 10 keepers."],
+  32: ["AwaitingDependency", "This job waits for the job it follows to run again."],
 } as const satisfies Record<number, readonly [string, string]>;
 
 export type ErrorCode = keyof typeof ERRORS;

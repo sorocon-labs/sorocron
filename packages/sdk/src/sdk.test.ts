@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { scValToNative } from "@stellar/stellar-sdk";
 import {
   ERRORS,
+  currentFee,
+  describeSchedule,
+  leaderboard,
+  schedule,
+  toExecution,
   SoroCronError,
   arg,
   depositFor,
@@ -27,13 +32,16 @@ function job(overrides: Partial<Job> = {}): Job {
     function: "increment",
     args: [],
     interval: 60n,
+    schedule: schedule.interval(),
     next_run: 1_000n,
     fee_per_run: 10n,
+    max_fee_per_run: 0n,
     balance: 100n,
     max_runs: 0,
     runs: 0,
     end_at: 0n,
     active: true,
+    failures: 0,
     ...overrides,
   };
 }
@@ -47,6 +55,8 @@ describe("jobStatus", () => {
     expect(jobStatus(job({ max_runs: 2, runs: 2 }), 1_000n)).toBe("completed");
     // Paused wins over everything else, as in ensure_due.
     expect(jobStatus(job({ active: false, balance: 0n }), 1_000n)).toBe("paused");
+    // A job that paused itself after failures is told apart from an owner pause.
+    expect(jobStatus(job({ active: false, failures: 3 }), 1_000n)).toBe("failing");
   });
 });
 
@@ -127,5 +137,55 @@ describe("errors", () => {
     expect(unwrapResult(ok)).toBe(5n);
     expect(unwrapResult(7)).toBe(7);
     expect(() => unwrapResult(err)).toThrow(ERRORS[1][1]);
+  });
+});
+
+describe("v4 schedules and fees", () => {
+  it("builds and describes schedules", () => {
+    expect(schedule.daily(12)).toEqual({ tag: "Daily", values: [12, 0] });
+    expect(schedule.weekly(0, 9, 30)).toEqual({ tag: "Weekly", values: [0, 9, 30] });
+    expect(describeSchedule({ schedule: schedule.interval(), interval: 3_600n })).toBe("every 1h");
+    expect(describeSchedule({ schedule: schedule.daily(7, 5), interval: 86_400n })).toBe("daily at 07:05 UTC");
+    expect(describeSchedule({ schedule: schedule.weekly(4, 18, 0), interval: 604_800n })).toBe("Fridays at 18:00 UTC");
+  });
+
+  it("mirrors the registry's fee ramp", () => {
+    const ramped = job({ fee_per_run: 10n, max_fee_per_run: 20n, interval: 60n, next_run: 1_000n, balance: 1_000n });
+    expect(currentFee(ramped, 1_000n)).toBe(10n);
+    expect(currentFee(ramped, 1_030n)).toBe(15n);
+    expect(currentFee(ramped, 5_000n)).toBe(20n);
+    expect(currentFee({ ...ramped, balance: 12n }, 5_000n)).toBe(12n);
+    expect(currentFee(job(), 9_999n)).toBe(10n);
+  });
+});
+
+describe("events", () => {
+  const event = (keeper: string, fee: bigint, success: boolean, lateness: bigint) => ({
+    name: "job_executed",
+    topics: [1n, keeper],
+    data: { success, fee, protocol_fee: fee / 10n, run: 1, next_run: 60n, lateness, failures: success ? 0 : 1 },
+    ledger: 5,
+    closedAt: "2026-10-07T00:00:00Z",
+    txHash: "abc",
+    id: "1",
+  });
+
+  it("decodes execution receipts", () => {
+    const x = toExecution(event("GA", 100n, true, 4n))!;
+    expect(x).toMatchObject({ jobId: 1n, keeper: "GA", success: true, fee: 100n, protocolFee: 10n, lateness: 4n });
+    expect(toExecution({ ...event("GA", 1n, true, 0n), name: "job_created" })).toBeUndefined();
+  });
+
+  it("ranks keepers by runs, then earnings", () => {
+    const rows = leaderboard(
+      [
+        event("GA", 100n, true, 2n),
+        event("GB", 100n, true, 0n),
+        event("GB", 50n, false, 6n),
+        event("GC", 1_000n, true, 0n),
+      ].map((e) => toExecution(e)!),
+    );
+    expect(rows.map((r) => r.keeper)).toEqual(["GB", "GC", "GA"]);
+    expect(rows[0]).toMatchObject({ runs: 2, failedRuns: 1, earned: 135n, averageLateness: 3n });
   });
 });

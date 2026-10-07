@@ -9,10 +9,11 @@
  * Pass `publicKey` and `signTransaction` (Freighter's, or a Keypair) to send
  * transactions; reads work without them.
  */
-import { contract } from "@stellar/stellar-sdk";
+import { contract, rpc } from "@stellar/stellar-sdk";
 import { SoroCronError, parseContractError } from "./errors.js";
 import type { NetworkConfig } from "./networks.js";
-import type { Config, Job, JobParams, JobUpdate, Keeper } from "./types.js";
+import { fetchEvents, toExecution, type EventPage, type Execution, type FetchEventsOptions } from "./events.js";
+import type { Config, Job, JobParams, JobState, JobUpdate, Keeper, KeeperStats } from "./types.js";
 
 export interface ConnectOptions {
   network: NetworkConfig;
@@ -116,8 +117,55 @@ export class SoroCron {
     return this.read("jobs_by_owner", { owner });
   }
 
+  /** The small per-run part of a job: one ledger entry, cheapest to poll. */
+  getJobState(jobId: bigint): Promise<JobState | undefined> {
+    return this.read("get_job_state", { job_id: jobId });
+  }
+
   getKeeper(keeper: string): Promise<Keeper | undefined> {
     return this.read("get_keeper", { keeper });
+  }
+
+  /** Executions, average lateness, missed windows and slashed stake. */
+  keeperStats(keeper: string): Promise<KeeperStats | undefined> {
+    return this.read("keeper_stats", { keeper });
+  }
+
+  /** Keepers in the assigned-window rotation. */
+  activeKeepers(): Promise<string[]> {
+    return this.read("active_keepers");
+  }
+
+  /** The keeper reserved for the job's next run, if assigned windows are on. */
+  assignedKeeper(jobId: bigint): Promise<string | undefined> {
+    return this.read("assigned_keeper", { job_id: jobId });
+  }
+
+  isTargetHalted(target: string): Promise<boolean> {
+    return this.read("is_target_halted", { target });
+  }
+
+  /** The fee a run would pay now, including any late-run ramp. */
+  currentFee(jobId: bigint): Promise<bigint | undefined> {
+    return this.read("current_fee", { job_id: jobId });
+  }
+
+  // --------------------------------------------------------------- events
+
+  /** Soroban RPC client for this network. */
+  get server(): rpc.Server {
+    return new rpc.Server(this.network.rpcUrl, { allowHttp: this.network.rpcUrl.startsWith("http://") });
+  }
+
+  /** Raw registry events; see `fetchEvents`. */
+  events(options: FetchEventsOptions = {}): Promise<EventPage> {
+    return fetchEvents(this.server, this.contractId, options);
+  }
+
+  /** Recent `JobExecuted` receipts, newest last. */
+  async recentExecutions(options: Omit<FetchEventsOptions, "names"> = {}): Promise<Execution[]> {
+    const page = await this.events({ ...options, names: ["job_executed"] });
+    return page.events.map(toExecution).filter((x): x is Execution => x !== undefined);
   }
 
   /** Authoritative due check, including the job's resolver. */
@@ -194,6 +242,11 @@ export class SoroCron {
 
   withdrawStake(): Promise<Sent<bigint>> {
     return this.send("withdraw_stake", { keeper: this.publicKey });
+  }
+
+  /** Pays out every listed keeper whose unbonding has finished. Anyone may send it. */
+  withdrawStakes(keepers: string[]): Promise<Sent<bigint[]>> {
+    return this.send("withdraw_stakes", { keepers });
   }
 }
 
