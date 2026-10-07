@@ -159,10 +159,7 @@ jobs:
       - name: Open a pull request with the new addresses
         uses: peter-evans/create-pull-request@v7
         with:
-          add-paths: |
-            deployments/testnet.json
-            packages/sdk/src
-            *.md
+          base: main
           branch: deploy/testnet-${{ github.run_id }}
           commit-message: "chore(deployments): redeploy testnet (${{ github.ref_name }})"
           title: "chore(deployments): redeploy testnet (${{ github.ref_name }})"

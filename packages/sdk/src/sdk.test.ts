@@ -22,7 +22,7 @@ import {
   type Job,
 } from "./index.js";
 
-const ADDR = "CDOAY46V2REWSINTZINUKTYELO5FYVEOCFWEKVMGH4BUJPSTRZTRGQ5W";
+const ADDR = "CDQPGH3YKV22VYFCZ4WUSOWFBM26PZDCTATCNBRUKLOUYAIJWDCQ6PE4";
 
 function job(overrides: Partial<Job> = {}): Job {
   return {
