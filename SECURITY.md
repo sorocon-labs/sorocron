@@ -28,8 +28,8 @@ What to expect:
 
 ## Scope
 
-In scope: everything in `contracts/` and `keeper-bot/`.
+In scope: everything in `contracts/`, `keeper-bot/`, `keeper-rs/`, `packages/` and `app/`.
 
 Out of scope: the testnet deployment's availability (testnet resets periodically), third-party dependencies (report upstream), and issues requiring a compromised admin key.
 
-The design assumptions and known limitations are documented in [docs/security.md](docs/security.md).
+The design assumptions and known limitations are documented in [docs/security.md](docs/security.md), and the structured [threat model](docs/threat-model.md) lists actors, assets, trust boundaries, threats with their mitigations, and open risks.

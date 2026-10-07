@@ -1,4 +1,4 @@
-import { formatAmount, formatDuration, jobStatus } from "@sorocron/sdk";
+import { describeSchedule, formatAmount, formatDuration, jobStatus } from "@sorocron/sdk";
 import { Icon } from "../components/Icon";
 import { Address, Badge, Button, Card, Empty, Facts, PageHeader, Skeleton, Stat, StatusBadge, relative } from "../components/ui";
 import { Link, navigate } from "../router";
@@ -63,7 +63,7 @@ export function Overview() {
                   <Link to={{ name: "job", id: job.id }} className="list-row">
                     <span className="job-id">#{job.id.toString()}</span>
                     <span className="mono grow">{job.function}</span>
-                    <span className="muted-cell">every {formatDuration(job.interval)}</span>
+                    <span className="muted-cell">{describeSchedule(job)}</span>
                     <StatusBadge status={jobStatus(job, now)} />
                     <span className="muted-cell when">{relative(job.next_run, now)}</span>
                   </Link>

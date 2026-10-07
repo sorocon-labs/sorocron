@@ -22,11 +22,25 @@ export interface ConnectOptions {
   /** Account that signs and pays for transactions. */
   publicKey?: string;
   signTransaction?: contract.ClientOptions["signTransaction"];
+  /**
+   * Signs Soroban authorization entries for accounts other than the
+   * transaction source. Needed when a channel account submits a
+   * transaction on behalf of a keeper (see `execute`'s `keeper` argument).
+   */
+  signAuthEntry?: contract.ClientOptions["signAuthEntry"];
 }
 
 export interface Sent<T> {
   hash: string;
   result: T;
+}
+
+/** A simulated transaction: what it would return and cost, ready to send. */
+export interface Prepared<T> {
+  result: T;
+  /** Resource fee from simulation, in stroops (excludes the inclusion fee). */
+  resourceFee: bigint;
+  send(): Promise<Sent<T>>;
 }
 
 /** Page size used by `allJobs`; matches the registry's MAX_GET_JOBS_LIMIT. */
@@ -35,11 +49,18 @@ export const PAGE_SIZE = 50;
 type Method = (args?: Record<string, unknown>) => Promise<contract.AssembledTransaction<unknown>>;
 
 export class SoroCron {
+  /**
+   * Inclusion fee in stroops for transactions this client sends. Unset uses
+   * the network minimum. Keepers raise it when the network is congested.
+   */
+  inclusionFee?: number;
+
   private constructor(
     private readonly client: contract.Client & Record<string, Method>,
     readonly contractId: string,
     readonly network: NetworkConfig,
     readonly publicKey?: string,
+    private readonly signAuthEntry?: contract.ClientOptions["signAuthEntry"],
   ) {}
 
   static async connect(options: ConnectOptions): Promise<SoroCron> {
@@ -50,12 +71,15 @@ export class SoroCron {
       networkPassphrase: options.network.networkPassphrase,
       publicKey: options.publicKey,
       signTransaction: options.signTransaction,
+      signAuthEntry: options.signAuthEntry,
+      allowHttp: options.network.rpcUrl.startsWith("http://"),
     });
     return new SoroCron(
       client as contract.Client & Record<string, Method>,
       contractId,
       options.network,
       options.publicKey,
+      options.signAuthEntry,
     );
   }
 
@@ -175,25 +199,49 @@ export class SoroCron {
 
   // --------------------------------------------------------------- writes
 
-  private async send<T>(method: string, args: Record<string, unknown>): Promise<Sent<T>> {
+  /**
+   * Builds and simulates a call. Throws `SoroCronError` if the simulation
+   * says the contract would reject it, so nothing is sent for a doomed call.
+   */
+  private async prepare<T>(method: string, args: Record<string, unknown>): Promise<Prepared<T>> {
     if (!this.publicKey) throw new Error("Connect a wallet (publicKey + signTransaction) to send transactions");
-    const fn = this.client[method];
+    const fn = this.client[method] as unknown as (
+      args: Record<string, unknown>,
+      options?: contract.MethodOptions,
+    ) => Promise<contract.AssembledTransaction<unknown>>;
     if (typeof fn !== "function") {
       throw new Error(`Registry ${this.contractId} has no "${method}" function (older version?)`);
     }
     let tx: contract.AssembledTransaction<unknown>;
     try {
-      tx = await fn.call(this.client, args);
+      tx = await fn.call(this.client, args, this.inclusionFee ? { fee: String(this.inclusionFee) } : undefined);
     } catch (err) {
       throw parseContractError(err) ?? err;
     }
     const result = unwrapResult<T>(tx.result);
-    try {
-      const sent = await tx.signAndSend();
-      return { hash: sent.sendTransactionResponse?.hash ?? "", result };
-    } catch (err) {
-      throw parseContractError(err) ?? err;
-    }
+    const resourceFee = BigInt(tx.simulationData?.transactionData.resourceFee ?? 0n);
+    return {
+      result,
+      resourceFee,
+      send: async () => {
+        try {
+          // Other accounts whose authorization the call needs (a keeper, when
+          // a channel account is the transaction source) sign their entries.
+          for (const address of tx.needsNonInvokerSigningBy()) {
+            if (!this.signAuthEntry) throw new Error(`${address} must authorize this call; pass signAuthEntry`);
+            await tx.signAuthEntries({ address, signAuthEntry: this.signAuthEntry });
+          }
+          const sent = await tx.signAndSend();
+          return { hash: sent.sendTransactionResponse?.hash ?? "", result };
+        } catch (err) {
+          throw parseContractError(err) ?? err;
+        }
+      },
+    };
+  }
+
+  private async send<T>(method: string, args: Record<string, unknown>): Promise<Sent<T>> {
+    return (await this.prepare<T>(method, args)).send();
   }
 
   createJob(params: JobParams, deposit: bigint): Promise<Sent<bigint>> {
@@ -224,12 +272,22 @@ export class SoroCron {
     return this.send("cancel_job", { job_id: jobId });
   }
 
-  execute(jobId: bigint): Promise<Sent<void>> {
-    return this.send("execute", { keeper: this.publicKey, job_id: jobId });
+  /**
+   * Runs a due job. `keeper` (default: this client's account) is the staked
+   * keeper that gets paid; when it differs from the transaction source, the
+   * keeper's auth entry is signed with `signAuthEntry`.
+   */
+  execute(jobId: bigint, keeper = this.publicKey): Promise<Sent<void>> {
+    return this.send("execute", { keeper, job_id: jobId });
   }
 
-  executeBatch(jobIds: bigint[]): Promise<Sent<boolean[]>> {
-    return this.send("execute_batch", { keeper: this.publicKey, job_ids: jobIds });
+  executeBatch(jobIds: bigint[], keeper = this.publicKey): Promise<Sent<boolean[]>> {
+    return this.send("execute_batch", { keeper, job_ids: jobIds });
+  }
+
+  /** Simulates `execute_batch`: which jobs would run and what it would cost. */
+  prepareExecuteBatch(jobIds: bigint[], keeper = this.publicKey): Promise<Prepared<boolean[]>> {
+    return this.prepare("execute_batch", { keeper, job_ids: jobIds });
   }
 
   stake(amount: bigint): Promise<Sent<bigint>> {

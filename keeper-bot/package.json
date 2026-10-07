@@ -1,19 +1,24 @@
 {
   "name": "sorocron-keeper-bot",
   "version": "0.3.0",
-  "description": "Reference SoroCron keeper node plus testnet deploy and demo scripts",
+  "description": "Reference SoroCron keeper node, CLI, and testnet deploy and demo scripts",
   "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy:testnet": "tsx src/deploy.ts",
-    "demo": "tsx src/demo.ts",
-    "keeper": "tsx src/keeper.ts",
+    "deploy:testnet": "tsx --conditions=development src/deploy.ts",
+    "deploy": "tsx --conditions=development src/deploy.ts",
+    "demo": "tsx --conditions=development src/demo.ts",
+    "keeper": "tsx --conditions=development src/keeper.ts",
+    "cli": "tsx --conditions=development src/cli.ts",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@sorocron/sdk": "^0.3.0",
     "@stellar/stellar-sdk": "^17.2.1",
+    "commander": "^14.0.0",
     "dotenv": "^18.0.5"
   },
   "devDependencies": {
@@ -21,5 +26,8 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
+  },
+  "bin": {
+    "sorocron": "dist/cli.js"
   }
 }

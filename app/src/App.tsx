@@ -11,7 +11,7 @@ import { NewJob } from "./pages/NewJob";
 import { Overview } from "./pages/Overview";
 import { Registry } from "./pages/Registry";
 import { Link, navigate, useRoute, type Route } from "./router";
-import { NETWORK, RegistryProvider, useNow, useRegistry } from "./state/registry";
+import { DOCS_URL, NETWORK, RegistryProvider, useNow, useRegistry } from "./state/registry";
 import { WalletProvider, useWallet } from "./state/wallet";
 
 export default function App() {
@@ -361,13 +361,13 @@ function MoreSheet({ open, onClose, route }: { open: boolean; onClose: () => voi
       <section className="sheet-section sheet-links">
         {row({ name: "my-jobs" }, "user", "My jobs", "Jobs owned by your account")}
         {row({ name: "registry" }, "registry", "Registry", "Configuration, contracts and error codes")}
-        <a className="sheet-row" href="https://github.com/sorocon-labs/sorocron" target="_blank" rel="noreferrer">
+        <a className="sheet-row" href={DOCS_URL} target="_blank" rel="noreferrer">
           <span className="choice-icon">
             <Icon name="book" size={17} />
           </span>
           <span className="sheet-row-text">
             <strong>Documentation</strong>
-            <small>Source, guides and security model</small>
+            <small>Guides, SDK reference and security model</small>
           </span>
           <Icon name="external" size={15} />
         </a>

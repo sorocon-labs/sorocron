@@ -1,274 +1,156 @@
 import { describe, expect, it } from "vitest";
-import { tick, type RegistryLike } from "./tick.js";
+import type { Prepared } from "@sorocron/sdk";
+import { ChannelPool } from "./channels.js";
+import { tick, type BatchClient, type DueSource, type FeeBidder, type TickDeps } from "./tick.js";
 
-const KEEPER = "GABC...KEEPER";
+const due = (...ids: number[]) => ids.map((id) => ({ id: BigInt(id), feePerRun: 1_000_000n }));
 
-function fakeRegistry(overrides: Partial<RegistryLike>): RegistryLike {
+function index(jobs: { id: bigint; feePerRun: bigint }[]): DueSource & { synced: number } {
   return {
-    job_count: async () => ({ result: 0n }),
-    is_due: async () => ({ result: false }),
-    execute: async () => {
-      throw new Error("execute should not be called");
+    synced: 0,
+    async sync() {
+      this.synced++;
     },
-    get_job: async () => ({ result: undefined }),
-    config: async () => ({ result: { fee_token: "NATIVE" } }),
-    ...overrides,
+    due: () => jobs,
   };
 }
 
-function collectLogs(): { log: (m: string) => void; lines: string[] } {
+function fees(): FeeBidder & { escalations: number; resets: number } {
+  return {
+    escalations: 0,
+    resets: 0,
+    current: () => 200,
+    escalate() {
+      this.escalations++;
+    },
+    reset() {
+      this.resets++;
+    },
+  };
+}
+
+/** A channel whose simulation runs every job in `runnable`. */
+function channel(
+  runnable: (id: bigint) => boolean,
+  opts: { resourceFee?: bigint; send?: () => Promise<{ hash: string }>; log?: bigint[][] } = {},
+): BatchClient {
+  return {
+    async prepareExecuteBatch(ids) {
+      opts.log?.push(ids);
+      const result = ids.map(runnable);
+      const prepared: Prepared<boolean[]> = {
+        result,
+        resourceFee: opts.resourceFee ?? 100_000n,
+        send: async () => ({ hash: "h", result, ...(opts.send ? await opts.send() : {}) }),
+      };
+      return prepared;
+    },
+  };
+}
+
+function deps(over: Partial<TickDeps> & Pick<TickDeps, "index" | "channels">): TickDeps & { lines: string[] } {
   const lines: string[] = [];
-  return { log: (m) => lines.push(m), lines };
+  return { fees: fees(), keeper: "GKEEPER", log: (m) => lines.push(m), batchSize: 2, feeIsNative: true, lines, ...over };
 }
 
 describe("tick", () => {
-  it("executes due jobs and skips ones that are not due", async () => {
-    const executed: bigint[] = [];
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 3n }),
-      is_due: async ({ job_id }) => ({ result: job_id === 1n }),
-      execute: async ({ job_id }) => {
-        executed.push(job_id);
-        return {
-          result: undefined,
-          signAndSend: async () => ({ sendTransactionResponse: { hash: "abc123" } }),
-        };
+  it("splits due jobs into batches and executes what simulation says will run", async () => {
+    const log: bigint[][] = [];
+    const d = deps({
+      index: index(due(1, 2, 3, 4, 5)),
+      channels: new ChannelPool([channel((id) => id !== 4n, { log })]),
+    });
+    const summary = await tick(d, 1_000n);
+
+    expect(log).toEqual([[1n, 2n], [3n, 4n], [5n]]);
+    expect(summary).toMatchObject({ due: 5, batches: 3, executed: 4, skipped: 1, failed: 0, earnedStroops: 4_000_000n });
+  });
+
+  it("does not send a batch where nothing would run", async () => {
+    let sends = 0;
+    const d = deps({
+      index: index(due(1, 2)),
+      channels: new ChannelPool([channel(() => false, { send: async () => (sends++, { hash: "" }) })]),
+    });
+    const summary = await tick(d, 1_000n);
+    expect(sends).toBe(0);
+    expect(summary).toMatchObject({ batches: 0, skipped: 2, executed: 0 });
+  });
+
+  it("skips batches that cost more than they earn", async () => {
+    const d = deps({
+      index: index(due(1)),
+      channels: new ChannelPool([channel(() => true, { resourceFee: 5_000_000n })]),
+      minProfitStroops: 0n,
+    });
+    const summary = await tick(d, 1_000n);
+    expect(summary).toMatchObject({ unprofitable: 1, executed: 0 });
+    expect(d.lines[0]).toContain("unprofitable");
+  });
+
+  it("escalates the fee bid when a send fails for fee reasons, resets on success", async () => {
+    const bidder = fees();
+    let attempt = 0;
+    const flaky = channel(() => true, {
+      send: async () => {
+        attempt++;
+        if (attempt === 1) throw new Error("txInsufficientFee");
+        return { hash: "ok" };
       },
     });
-    const { log, lines } = collectLogs();
+    const d = deps({ index: index(due(1)), channels: new ChannelPool([flaky]), fees: bidder, batchSize: 1 });
+    const first = await tick(d, 1_000n);
+    expect(first).toMatchObject({ failed: 1, executed: 0 });
+    expect(bidder.escalations).toBe(1);
 
-    const summary = await tick(registry, KEEPER, log);
-
-    expect(executed).toEqual([1n]);
-    expect(summary).toMatchObject({ checked: 3, due: 1, executed: 1, skipped: 0, failed: 0 });
-    expect(lines.some((l) => l.includes("job 1: executed"))).toBe(true);
+    const second = await tick(d, 1_000n);
+    expect(second).toMatchObject({ executed: 1 });
+    expect(bidder.resets).toBe(1);
   });
 
-  it("skips a job whose simulated execution returns a contract error", async () => {
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 1n }),
-      is_due: async () => ({ result: true }),
-      execute: async () => ({
-        result: {
-          isErr: () => true,
-          unwrapErr: () => ({ message: "JobNotDue" }),
-        },
-        signAndSend: async () => {
-          throw new Error("should not send a failed simulation");
-        },
-      }),
-    });
-    const { log, lines } = collectLogs();
-
-    const summary = await tick(registry, KEEPER, log);
-
-    expect(lines.some((l) => l.includes("job 0: skipped (JobNotDue)"))).toBe(true);
-    expect(summary.skipped).toBe(1);
-  });
-
-  it("logs and continues when signAndSend fails (e.g. another keeper won the race)", async () => {
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 2n }),
-      is_due: async () => ({ result: true }),
-      execute: async ({ job_id }) => ({
-        result: undefined,
-        signAndSend: async () => {
-          if (job_id === 0n) throw new Error("txBadSeq\nmore detail on another line");
-          return { sendTransactionResponse: { hash: "def456" } };
-        },
-      }),
-    });
-    const { log, lines } = collectLogs();
-
-    await tick(registry, KEEPER, log);
-
-    expect(lines.some((l) => l.includes("job 0: execution failed (txBadSeq)"))).toBe(true);
-    expect(lines.some((l) => l.includes("job 1: executed"))).toBe(true);
-  });
-
-  it("treats an is_due RPC failure as not due, without aborting the pass", async () => {
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 2n }),
-      is_due: async ({ job_id }) => {
-        if (job_id === 0n) throw new Error("RPC timeout");
-        return { result: true };
-      },
-      execute: async () => ({
-        result: undefined,
-        signAndSend: async () => ({ sendTransactionResponse: {} }),
-      }),
-    });
-    const { log, lines } = collectLogs();
-
-    await tick(registry, KEEPER, log);
-
-    expect(lines.some((l) => l.includes("job 1: executed"))).toBe(true);
-  });
-});
-
-describe("tick profitability check (#22)", () => {
-  it("skips a due job whose network fee would exceed fee_per_run, when paid in the native token", async () => {
-    const sent: bigint[] = [];
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 1n }),
-      is_due: async () => ({ result: true }),
-      config: async () => ({ result: { fee_token: "NATIVE" } }),
-      get_job: async () => ({ result: { fee_per_run: 100n } }),
-      execute: async ({ job_id }) => ({
-        result: undefined,
-        simulationData: { transactionData: { resourceFee: 500n } },
-        signAndSend: async () => {
-          sent.push(job_id);
-          return {};
-        },
-      }),
-    });
-    const { log, lines } = collectLogs();
-
-    await tick(registry, KEEPER, log, { nativeFeeTokenId: "NATIVE" });
-
-    expect(sent).toEqual([]);
-    expect(lines.some((l) => l.includes("job 0: skipped (unprofitable"))).toBe(true);
-  });
-
-  it("executes a due job whose fee covers the network cost plus the configured minimum profit", async () => {
-    const sent: bigint[] = [];
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 1n }),
-      is_due: async () => ({ result: true }),
-      config: async () => ({ result: { fee_token: "NATIVE" } }),
-      get_job: async () => ({ result: { fee_per_run: 1_000n } }),
-      execute: async ({ job_id }) => ({
-        result: undefined,
-        simulationData: { transactionData: { resourceFee: 200n } },
-        signAndSend: async () => {
-          sent.push(job_id);
-          return { sendTransactionResponse: { hash: "abc" } };
-        },
-      }),
-    });
-    const { log, lines } = collectLogs();
-
-    await tick(registry, KEEPER, log, { nativeFeeTokenId: "NATIVE", minProfitStroops: 500n });
-
-    expect(sent).toEqual([0n]);
-    expect(lines.some((l) => l.includes("job 0: executed"))).toBe(true);
-  });
-
-  it("does not check profitability when the job's fee token isn't the native token", async () => {
-    const sent: bigint[] = [];
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 1n }),
-      is_due: async () => ({ result: true }),
-      config: async () => ({ result: { fee_token: "SOME_OTHER_TOKEN" } }),
-      get_job: async () => {
-        throw new Error("get_job should not be called when the fee token isn't native");
-      },
-      execute: async ({ job_id }) => ({
-        result: undefined,
-        simulationData: { transactionData: { resourceFee: 999_999n } },
-        signAndSend: async () => {
-          sent.push(job_id);
-          return {};
-        },
-      }),
-    });
-    const { log } = collectLogs();
-
-    await tick(registry, KEEPER, log, { nativeFeeTokenId: "NATIVE" });
-
-    expect(sent).toEqual([0n]);
-  });
-
-  it("skips the profitability check entirely when nativeFeeTokenId is omitted", async () => {
-    const sent: bigint[] = [];
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 1n }),
-      is_due: async () => ({ result: true }),
-      config: async () => {
-        throw new Error("config should not be called when nativeFeeTokenId is omitted");
-      },
-      execute: async ({ job_id }) => ({
-        result: undefined,
-        simulationData: { transactionData: { resourceFee: 999_999n } },
-        signAndSend: async () => {
-          sent.push(job_id);
-          return {};
-        },
-      }),
-    });
-    const { log } = collectLogs();
-
-    await tick(registry, KEEPER, log);
-
-    expect(sent).toEqual([0n]);
-  });
-});
-
-describe("tick concurrency (#48)", () => {
-  it("checks is_due concurrently, but still builds/simulates/sends each due job one at a time, in job id order", async () => {
-    let dueCheckInFlight = 0;
-    let maxDueCheckInFlight = 0;
-    let buildOrSendInFlight = 0;
-    let maxBuildOrSendInFlight = 0;
-    const submitted: bigint[] = [];
-
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 5n }),
-      is_due: async ({ job_id }) => {
-        dueCheckInFlight++;
-        maxDueCheckInFlight = Math.max(maxDueCheckInFlight, dueCheckInFlight);
-        await new Promise((r) => setTimeout(r, 5));
-        dueCheckInFlight--;
-        return { result: job_id !== 2n }; // every job but #2 is due
-      },
-      execute: async ({ job_id }) => {
-        // Building a transaction bakes in the account's sequence number, so
-        // this must never overlap another job's build or send either.
-        buildOrSendInFlight++;
-        maxBuildOrSendInFlight = Math.max(maxBuildOrSendInFlight, buildOrSendInFlight);
-        await new Promise((r) => setTimeout(r, 2));
-        buildOrSendInFlight--;
-        return {
-          result: undefined,
-          signAndSend: async () => {
-            buildOrSendInFlight++;
-            maxBuildOrSendInFlight = Math.max(maxBuildOrSendInFlight, buildOrSendInFlight);
-            await new Promise((r) => setTimeout(r, 5));
-            buildOrSendInFlight--;
-            submitted.push(job_id);
-            return {};
+  it("rebuilds and resends once after a stale sequence number", async () => {
+    let attempt = 0;
+    const d = deps({
+      index: index(due(1)),
+      channels: new ChannelPool([
+        channel(() => true, {
+          send: async () => {
+            attempt++;
+            if (attempt === 1) throw new Error("txBadSeq");
+            return { hash: "ok" };
           },
-        };
-      },
+        }),
+      ]),
     });
-    const { log } = collectLogs();
-
-    await tick(registry, KEEPER, log, { maxConcurrency: 4 });
-
-    expect(maxDueCheckInFlight).toBeGreaterThan(1);
-    expect(maxBuildOrSendInFlight).toBe(1);
-    expect(submitted).toEqual([0n, 1n, 3n, 4n]);
+    const summary = await tick(d, 1_000n);
+    expect(summary).toMatchObject({ executed: 1, failed: 0 });
+    expect(attempt).toBe(2);
   });
 
-  it("defaults to fully sequential is_due checks when maxConcurrency is omitted", async () => {
-    let maxDueCheckInFlight = 0;
-    let dueCheckInFlight = 0;
-    const registry = fakeRegistry({
-      job_count: async () => ({ result: 3n }),
-      is_due: async () => {
-        dueCheckInFlight++;
-        maxDueCheckInFlight = Math.max(maxDueCheckInFlight, dueCheckInFlight);
-        await new Promise((r) => setTimeout(r, 1));
-        dueCheckInFlight--;
-        return { result: true };
-      },
-      execute: async () => ({ result: undefined, signAndSend: async () => ({}) }),
-    });
-    const { log } = collectLogs();
+  it("runs batches in parallel across channels", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const slow = () =>
+      channel(() => true, {
+        send: async () => {
+          peak = Math.max(peak, ++inFlight);
+          await new Promise((r) => setTimeout(r, 10));
+          inFlight--;
+          return { hash: "h" };
+        },
+      });
+    const d = deps({ index: index(due(1, 2, 3, 4, 5, 6)), channels: new ChannelPool([slow(), slow(), slow()]) });
+    const summary = await tick(d, 1_000n);
+    expect(summary.executed).toBe(6);
+    expect(peak).toBe(3);
+  });
 
-    await tick(registry, KEEPER, log);
-
-    expect(maxDueCheckInFlight).toBe(1);
+  it("a simulation error skips the batch without stopping the tick", async () => {
+    const broken: BatchClient = {
+      prepareExecuteBatch: async () => Promise.reject(new Error("Error(Contract, #12)")),
+    };
+    const d = deps({ index: index(due(1, 2)), channels: new ChannelPool([broken]) });
+    const summary = await tick(d, 1_000n);
+    expect(summary).toMatchObject({ skipped: 2, executed: 0 });
   });
 });

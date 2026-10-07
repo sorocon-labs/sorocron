@@ -37,6 +37,11 @@ jobs:
         run: cargo test -p sorocron-registry proptest
         env:
           PROPTEST_CASES: 2048
+      - name: WASM size report (issue #78)
+        # A table of every contract's size against contracts/wasm-sizes.txt
+        # in the job summary. Informational: compiler updates shift sizes by
+        # a few bytes, so only the budget below fails the build.
+        run: scripts/contract-snapshots.sh --sizes >> "$GITHUB_STEP_SUMMARY"
       - name: Enforce WASM size budget
         # Soroban rejects contracts over 64 KB; fail early with headroom.
         run: |
@@ -49,26 +54,122 @@ jobs:
               exit 1
             fi
           done
+      - name: Contract interfaces match their snapshots (issue #54)
+        # A renamed function, error code or event silently breaks keepers,
+        # the SDK and the app. Snapshots live in contracts/interfaces; when a
+        # change is intended, rerun scripts/contract-snapshots.sh and commit.
+        run: scripts/contract-snapshots.sh --check
 
-  keeper-bot:
-    name: Keeper bot (typecheck, test)
+  coverage:
+    name: Contract test coverage
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: keeper-bot
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: stellar/stellar-cli@v28.1.0
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      # The upgrade test installs the built registry WASM.
+      - run: stellar contract build
+      - name: Run tests with coverage
+        run: cargo llvm-cov --no-report --workspace --exclude sorocron-bench
+        env:
+          # Instrumented property tests are slow; the contracts job runs the
+          # full case counts.
+          PROPTEST_CASES: 64
+      - name: Reports
+        # Test code, the shared test kit and the benchmark aren't product
+        # code, so they don't count towards the percentage.
+        run: |
+          ignore='(^|/)(test[^/]*|proptests|invariants)\.rs$|contracts/(testkit|bench)/'
+          cargo llvm-cov report --ignore-filename-regex "$ignore" --lcov --output-path lcov.info
+          {
+            echo '### Contract coverage'
+            echo '```'
+            cargo llvm-cov report --ignore-filename-regex "$ignore" --summary-only
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+      # Feeds the README badge. Needs a CODECOV_TOKEN secret; without one
+      # the upload is skipped and the job still passes.
+      - uses: codecov/codecov-action@v5
+        if: env.CODECOV_TOKEN != ''
+        with:
+          files: lcov.info
+          token: ${{ env.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  e2e:
+    name: End to end on a local network
+    # Deploys the contracts to a fresh stellar/quickstart network, then runs
+    # the demo (stake, create two jobs, execute both), the CLI and a keeper
+    # pass, so the contracts, SDK, CLI and keeper are checked together.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STELLAR_NETWORK: local
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start a local network
+        run: docker run -d --name stellar -p 8000:8000 stellar/quickstart:latest --local
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+      - uses: Swatinem/rust-cache@v2
+      - uses: stellar/stellar-cli@v28.1.0
+      - run: stellar contract build
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: keeper-bot/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - name: Wait for RPC and Friendbot
+        run: |
+          for i in $(seq 1 120); do
+            health=$(curl -s -X POST -H 'Content-Type: application/json'               -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' http://localhost:8000/rpc || true)
+            friendbot=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/friendbot || true)
+            if echo "$health" | grep -q '"healthy"' && [ "$friendbot" != "000" ] && [ "${friendbot:0:1}" != "5" ]; then
+              echo "Network ready after $((i * 5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::The local network didn't become ready in 10 minutes"
+          docker logs --tail 100 stellar
+          exit 1
+      - name: Deploy
+        run: npm run deploy -w sorocron-keeper-bot
+      - name: Demo (fails unless both jobs run)
+        run: npm run demo -w sorocron-keeper-bot
+      - name: CLI
+        run: |
+          npm run -s cli -w sorocron-keeper-bot -- registry
+          npm run -s cli -w sorocron-keeper-bot -- jobs list
+          npm run -s cli -w sorocron-keeper-bot -- keeper status
+      - name: Keeper runs the counter job again once it's due
+        run: |
+          sleep 35
+          npm run keeper -w sorocron-keeper-bot -- --once
+          npm run -s cli -w sorocron-keeper-bot -- jobs show 0 | tee job.txt
+          grep -Eq '^Runs +2 of 10' job.txt || {
+            echo "::error::The keeper didn't execute the counter job"
+            exit 1
+          }
+      - name: Network logs
+        if: failure()
+        run: docker logs --tail 200 stellar
 
-  sdk-app:
-    name: SDK and web app (typecheck, test, build)
+  typescript:
+    name: TypeScript (SDK, React hooks, keeper, app)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -81,3 +182,39 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  docs:
+    name: Documentation site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      - run: node scripts/prepare-book.mjs
+      - run: mdbook build book
+
+  keeper-rs:
+    name: Rust keeper (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: keeper-rs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: keeper-rs
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  keeper-image:
+    name: Keeper Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -f keeper-bot/Dockerfile -t sorocron-keeper .

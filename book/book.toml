@@ -1,0 +1,25 @@
+# SoroCron documentation site. The chapters are the repository's own docs
+# and package READMEs, assembled into src/ by scripts/prepare-book.mjs:
+#
+#   node scripts/prepare-book.mjs && mdbook serve book
+[book]
+title = "SoroCron"
+description = "Decentralized automation for Soroban smart contracts on Stellar"
+authors = ["SoroCron contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "build"
+create-missing = false
+
+[output.html]
+site-url = "/sorocron/docs/"
+git-repository-url = "https://github.com/sorocon-labs/sorocron"
+git-repository-icon = "fa-github"
+default-theme = "light"
+preferred-dark-theme = "coal"
+additional-js = ["mermaid-init.js"]
+
+[output.html.search]
+limit-results = 20

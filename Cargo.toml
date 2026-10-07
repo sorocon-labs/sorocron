@@ -1,5 +1,7 @@
 [workspace]
 resolver = "2"
+# The Rust keeper is its own workspace (see keeper-rs/Cargo.toml).
+exclude = ["keeper-rs"]
 members = [
     "contracts/registry",
     "contracts/executor",

@@ -1,11 +1,11 @@
-name: Deploy web app
+name: Deploy site
 
-# Publishes app/ to GitHub Pages. One-time setup: Settings -> Pages ->
-# Source: "GitHub Actions".
+# Publishes the dashboard (app/) at the site root and the documentation book
+# (book/, issue #55) under /docs/ on every push to main. One-time setup:
+# Settings -> Pages -> Source: "GitHub Actions".
 on:
   push:
     branches: [main]
-    paths: ["app/**", "packages/sdk/**", "package-lock.json", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -34,6 +34,16 @@ jobs:
       - run: npm run build -w sorocron-app
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      - name: Build the documentation
+        run: |
+          node scripts/prepare-book.mjs
+          mdbook build book
+          cp -r book/build app/dist/docs
+        env:
+          MDBOOK_OUTPUT__HTML__SITE_URL: /${{ github.event.repository.name }}/docs/
       - uses: actions/upload-pages-artifact@v4
         with:
           path: app/dist

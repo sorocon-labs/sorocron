@@ -695,6 +695,11 @@ p {
   color: var(--muted);
   letter-spacing: 0;
 }
+.big-figure.small-text {
+  font-size: 20px;
+  line-height: 1.35;
+  padding-top: 4px;
+}
 .big-figure.small {
   font-size: 20px;
 }
@@ -1005,6 +1010,26 @@ a.list-row:hover {
   border-bottom: 0;
 }
 .code-n {
+  color: var(--faint);
+}
+
+.leaderboard .table-head,
+.leaderboard .board-row {
+  grid-template-columns: 28px minmax(0, 2fr) 0.6fr 0.6fr 0.9fr 1fr;
+  padding: 0;
+}
+.board-row > span:nth-child(2) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rank {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.card-note {
+  font-size: 12.5px;
   color: var(--faint);
 }
 
@@ -1513,6 +1538,19 @@ a.list-row:hover {
 }
 .colon {
   text-align: center;
+}
+
+.calendar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.calendar-row .select {
+  width: 96px;
+}
+.calendar-row .select.weekday {
+  width: 160px;
 }
 
 /* ---- wizard --------------------------------------------------------------- */
@@ -2449,6 +2487,19 @@ a.list-row:hover {
   a.table-row:active,
   a.list-row:active {
     background: var(--sunken);
+  }
+  .leaderboard .table-head {
+    display: none;
+  }
+  .leaderboard .board-row {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    grid-template-areas: none;
+    padding: 10px 0;
+  }
+  .leaderboard .board-row > :nth-child(3),
+  .leaderboard .board-row > :nth-child(4),
+  .leaderboard .board-row > :nth-child(5) {
+    display: none;
   }
   .table-row.static.three {
     grid-template-columns: minmax(0, 1fr) auto;

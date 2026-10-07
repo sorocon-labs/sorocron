@@ -1,0 +1,35 @@
+image:
+  repository: ghcr.io/sorocon-labs/sorocron-keeper
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Name of an existing Secret with STELLAR_SECRET_KEY and optionally
+# CHANNEL_SECRET_KEYS and ALERT_WEBHOOK_URL. Recommended: manage it with your
+# secret store (External Secrets, Sealed Secrets, Vault) rather than values.
+existingSecret: sorocron-keeper
+
+network: testnet
+rpcUrl: https://soroban-testnet.stellar.org
+registry: ""          # defaults to the deployment bundled in the image
+
+keeper:
+  pollIntervalMs: 10000
+  batchSize: 10
+  feePercentile: p70
+  maxInclusionFee: 100000
+  minBalanceXlm: 5
+  minProfitStroops: 0
+  alertFormat: generic
+  alertCooldownMs: 3600000
+
+metrics:
+  port: 9464
+  serviceMonitor: false   # set true with the Prometheus Operator
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 384Mi }
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

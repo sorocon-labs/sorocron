@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { formatAmount, formatDuration, jobStatus, type Job } from "@sorocron/sdk";
+import { useEffect, useState } from "react";
+import { formatAmount, formatDuration, jobStatus, leaderboard, type Job, type LeaderboardRow } from "@sorocron/sdk";
 import { Icon } from "../components/Icon";
-import { Badge, Button, Card, Empty, Facts, PageHeader, Skeleton, Stat, relative } from "../components/ui";
+import { Address, Badge, Button, Card, Empty, Facts, PageHeader, Skeleton, Stat, relative } from "../components/ui";
 import { AmountModal, ConfirmModal } from "../modals";
 import { Link } from "../router";
-import { useNow, useRegistry } from "../state/registry";
+import { describe, useNow, useRegistry } from "../state/registry";
 import { useWallet } from "../state/wallet";
 
 type Dialog = { kind: "stake" | "unbond" | "withdraw" } | { kind: "execute"; job: Job } | null;
@@ -115,6 +115,12 @@ export function Keeper() {
                 items={[
                   ["Stake", `${formatAmount(keeper.stake)} XLM`],
                   ["Jobs executed", keeper.executions.toString()],
+                  [
+                    "Average lateness",
+                    keeper.executions > 0 ? formatDuration((keeper.total_lateness ?? 0n) / BigInt(keeper.executions)) : "—",
+                  ],
+                  ["Missed windows", String(keeper.missed ?? 0)],
+                  ["Slashed", `${formatAmount(keeper.slashed ?? 0n)} XLM`],
                   ...(unbondingAt !== undefined
                     ? ([["Withdrawable", now >= unbondingAt ? "Now" : relative(unbondingAt, now)]] as [string, string][])
                     : []),
@@ -134,6 +140,8 @@ export function Keeper() {
             <p className="card-text">Stake at least {config ? formatAmount(config.min_stake) : "the minimum"} XLM to register as a keeper.</p>
           )}
         </Card>
+
+        <Leaderboard account={account} />
 
         <Card title="Run a keeper node" className="span-3">
           <div className="node">
@@ -211,5 +219,89 @@ export function Keeper() {
         </>
       )}
     </>
+  );
+}
+
+/**
+ * Keepers ranked by runs over the events the RPC server still holds (about
+ * a week on testnet), from `JobExecuted` receipts.
+ */
+function Leaderboard({ account }: { account?: string }) {
+  const { cron, updatedAt } = useRegistry();
+  const [rows, setRows] = useState<LeaderboardRow[]>();
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    if (!cron) return;
+    let cancelled = false;
+    cron
+      .recentExecutions({ startLedger: 1, limit: 10_000 })
+      .then((executions) => {
+        if (cancelled) return;
+        setRows(leaderboard(executions));
+        setError(undefined);
+      })
+      .catch((err) => !cancelled && setError(describe(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, [cron, updatedAt]);
+
+  return (
+    <Card title="Leaderboard" className="span-3" action={<span className="card-note">Last 7 days</span>}>
+      {error ? (
+        <Empty icon="alert" title="Couldn't load executions">
+          {error}
+        </Empty>
+      ) : rows === undefined ? (
+        <Skeleton rows={3} height={40} />
+      ) : rows.length === 0 ? (
+        <Empty icon="keeper" title="No executions this week">
+          Keepers appear here as they run jobs.
+        </Empty>
+      ) : (
+        <div className="table compact leaderboard" role="table" aria-label="Keeper leaderboard">
+          <div className="table-head" role="row">
+            <span role="columnheader">#</span>
+            <span role="columnheader">Keeper</span>
+            <span role="columnheader" className="num">
+              Runs
+            </span>
+            <span role="columnheader" className="num">
+              Failed
+            </span>
+            <span role="columnheader" className="num">
+              Avg. lateness
+            </span>
+            <span role="columnheader" className="num">
+              Earned
+            </span>
+          </div>
+          {rows.slice(0, 10).map((row, i) => (
+            <div key={row.keeper} className="table-row static board-row" role="row">
+              <span role="cell" className="rank">
+                {i + 1}
+              </span>
+              <span role="cell">
+                <Address value={row.keeper} />
+                {row.keeper === account && <span className="tag">You</span>}
+              </span>
+              <span role="cell" className="num">
+                {row.runs}
+              </span>
+              <span role="cell" className="num muted-cell">
+                {row.failedRuns}
+              </span>
+              <span role="cell" className="num muted-cell">
+                {formatDuration(row.averageLateness)}
+              </span>
+              <span role="cell" className="num mono">
+                {formatAmount(row.earned)} XLM
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }

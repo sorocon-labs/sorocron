@@ -159,6 +159,7 @@ const STATUS: Record<JobStatus, { label: string; tone: string }> = {
   scheduled: { label: "Scheduled", tone: "blue" },
   underfunded: { label: "Needs funds", tone: "yellow" },
   paused: { label: "Paused", tone: "gray" },
+  failing: { label: "Failing", tone: "red" },
   expired: { label: "Expired", tone: "red" },
   completed: { label: "Completed", tone: "gray" },
 };

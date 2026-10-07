@@ -1,0 +1,53 @@
+{
+  "name": "@sorocron/react",
+  "version": "0.3.0",
+  "description": "React hooks for SoroCron: watch jobs and keepers with auto-refresh",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sorocon-labs/sorocron",
+    "directory": "packages/react"
+  },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "react",
+    "hooks",
+    "automation",
+    "cron"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@sorocron/sdk": "^0.3.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@sorocron/sdk": "^0.3.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.3.0",
+    "jsdom": "^27.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

@@ -1,4 +1,4 @@
-export { SoroCron, PAGE_SIZE, unwrapResult, type ConnectOptions, type Sent } from "./client.js";
+export { SoroCron, PAGE_SIZE, unwrapResult, type ConnectOptions, type Prepared, type Sent } from "./client.js";
 export { ERRORS, SoroCronError, parseContractError, type ErrorCode, type ErrorName } from "./errors.js";
 export { arg, parseArg, ttlGuardianArgs, LEDGERS_PER_DAY, type ArgType } from "./args.js";
 export {

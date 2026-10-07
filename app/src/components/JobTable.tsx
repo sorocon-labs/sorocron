@@ -1,7 +1,9 @@
-import { formatAmount, formatDuration, jobStatus, runsRemaining, type Job } from "@sorocron/sdk";
+import { describeSchedule, formatAmount, jobStatus, runsRemaining, type Job } from "@sorocron/sdk";
 import { Link } from "../router";
 import { Icon } from "./Icon";
 import { StatusBadge, relative, short } from "./ui";
+
+const cap = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 export function JobTable({ jobs, now, account }: { jobs: Job[]; now: bigint; account?: string }) {
   return (
@@ -9,7 +11,7 @@ export function JobTable({ jobs, now, account }: { jobs: Job[]; now: bigint; acc
       <div className="table-head" role="row">
         <span role="columnheader">Job</span>
         <span role="columnheader">Status</span>
-        <span role="columnheader">Every</span>
+        <span role="columnheader">Schedule</span>
         <span role="columnheader">Next run</span>
         <span role="columnheader" className="num">
           Runs left
@@ -35,7 +37,7 @@ export function JobTable({ jobs, now, account }: { jobs: Job[]; now: bigint; acc
               <StatusBadge status={status} />
             </span>
             <span className="c-every muted-cell" role="cell">
-              {formatDuration(job.interval)}
+              {describeSchedule(job)}
             </span>
             <span className="c-next muted-cell" role="cell">
               {next}
@@ -48,7 +50,7 @@ export function JobTable({ jobs, now, account }: { jobs: Job[]; now: bigint; acc
               <span className="unit"> XLM</span>
             </span>
             <span className="c-meta" aria-hidden="true">
-              Every {formatDuration(job.interval)}
+              {cap(describeSchedule(job))}
               {live && <> · {status === "due" ? `due ${next}` : `next ${next}`}</>}
             </span>
             <span className="c-arrow row-arrow" aria-hidden="true">

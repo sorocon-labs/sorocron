@@ -1,5 +1,7 @@
 .git
 target
-keeper-bot/node_modules
-keeper-bot/dist
+node_modules
+**/node_modules
+**/dist
 keeper-bot/.env
+app/dist

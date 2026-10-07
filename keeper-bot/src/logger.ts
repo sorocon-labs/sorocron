@@ -5,6 +5,8 @@
  */
 export type Level = "info" | "warn" | "error";
 
+export type Logger = (message: string) => void;
+
 export function formatLine(format: string, level: Level, message: string, now: Date): string {
   if (format === "json") {
     return JSON.stringify({ time: now.toISOString(), level, msg: message });

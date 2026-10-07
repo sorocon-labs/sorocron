@@ -3,6 +3,9 @@ import { SoroCron, TESTNET, type Config, type Job, type Keeper } from "@sorocron
 import { signTransaction } from "@stellar/freighter-api";
 
 export const NETWORK = TESTNET;
+export const REPO_URL = "https://github.com/sorocon-labs/sorocron";
+/** The documentation site, published with the app by .github/workflows/pages.yml. */
+export const DOCS_URL = "https://sorocon-labs.github.io/sorocron/docs/";
 const REFRESH_MS = 15_000;
 
 export interface RegistryState {

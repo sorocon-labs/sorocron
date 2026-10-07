@@ -20,7 +20,7 @@ export type JobStatus =
  * `paused` is one its owner paused.
  */
 export function jobStatus(job: Job, now: bigint): JobStatus {
-  if (!job.active) return job.failures > 0 ? "failing" : "paused";
+  if (!job.active) return (job.failures ?? 0) > 0 ? "failing" : "paused";
   if (job.max_runs !== 0 && job.runs >= job.max_runs) return "completed";
   if (job.end_at !== 0n && now >= job.end_at) return "expired";
   if (job.balance < job.fee_per_run) return "underfunded";
@@ -94,7 +94,9 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 /** "every 1h", "daily at 12:00 UTC", "Mondays at 09:30 UTC". */
 export function describeSchedule(job: Pick<Job, "schedule" | "interval">): string {
-  const s = job.schedule;
+  // Registries older than v4 have no `schedule`: they only run on intervals.
+  const s = job.schedule as Schedule | undefined;
+  if (!s) return `every ${formatDuration(job.interval)}`;
   if (s.tag === "Daily") return `daily at ${pad(s.values[0])}:${pad(s.values[1])} UTC`;
   if (s.tag === "Weekly") return `${WEEKDAYS[s.values[0]]}s at ${pad(s.values[1])}:${pad(s.values[2])} UTC`;
   return `every ${formatDuration(job.interval)}`;
@@ -109,7 +111,7 @@ export function describeSchedule(job: Pick<Job, "schedule" | "interval">): strin
 export function currentFee(job: Job, now: bigint): bigint {
   const base = job.fee_per_run;
   let fee = base;
-  if (job.max_fee_per_run > base && job.interval > 0n) {
+  if ((job.max_fee_per_run ?? 0n) > base && job.interval > 0n) {
     const late = now > job.next_run ? now - job.next_run : 0n;
     fee = late >= job.interval ? job.max_fee_per_run : base + ((job.max_fee_per_run - base) * late) / job.interval;
   }

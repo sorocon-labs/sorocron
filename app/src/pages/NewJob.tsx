@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import {
   depositFor,
+  describeSchedule,
   formatAmount,
   formatDuration,
   parseAmount,
   parseArg,
+  schedule as sched,
   ttlGuardianArgs,
   type ArgType,
   type JobParams,
@@ -14,13 +16,20 @@ import { DatePicker, formatDateTime } from "../components/DatePicker";
 import { Icon, type IconName } from "../components/Icon";
 import { Modal, TxStatus, useTx } from "../components/Modal";
 import { Select, type Option } from "../components/Select";
-import { Button, Disclosure, Field, PageHeader, Switch, TextInput } from "../components/ui";
+import { Button, Disclosure, Field, PageHeader, Segmented, Switch, TextInput } from "../components/ui";
 import { Link } from "../router";
 import { NETWORK, useRegistry } from "../state/registry";
 import { useWallet } from "../state/wallet";
 
 type Template = "counter" | "guardian" | "custom";
 type Unit = "minutes" | "hours" | "days";
+type Cadence = "interval" | "daily" | "weekly";
+const HOURS: Option<string>[] = Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: String(h).padStart(2, "0") }));
+const MINUTES: Option<string>[] = Array.from({ length: 12 }, (_, i) => ({ value: String(i * 5), label: String(i * 5).padStart(2, "0") }));
+const WEEKDAYS: Option<string>[] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((d, i) => ({
+  value: String(i),
+  label: d,
+}));
 const UNIT_SECONDS: Record<Unit, number> = { minutes: 60, hours: 3_600, days: 86_400 };
 const UNITS: Option<Unit>[] = [
   { value: "minutes", label: "minutes" },
@@ -81,6 +90,13 @@ export function NewJob() {
   const [limitRuns, setLimitRuns] = useState(false);
   const [maxRuns, setMaxRuns] = useState("");
   const [resolver, setResolver] = useState("");
+  const [cadence, setCadence] = useState<Cadence>("interval");
+  const [hour, setHour] = useState("12");
+  const [minute, setMinute] = useState("0");
+  const [weekday, setWeekday] = useState("0");
+  const [afterJob, setAfterJob] = useState("");
+  const [rampFee, setRampFee] = useState(false);
+  const [maxFee, setMaxFee] = useState("");
 
   const [fee, setFee] = useState("0.1");
   const [prepaid, setPrepaid] = useState("24");
@@ -126,20 +142,34 @@ export function NewJob() {
     return { errors, target: jobTarget, fn: jobFn, encoded };
   }, [template, target, fn, args, guarded, config]);
 
-  const schedule = useMemo(() => {
+  const plan = useMemo(() => {
     const errors: Record<string, string> = {};
     const n = Number(every);
-    const interval = BigInt(Math.round((Number.isFinite(n) ? n : 0) * UNIT_SECONDS[unit]));
-    if (!(n > 0)) errors.every = "Enter a number above zero.";
-    else if (config && config.min_interval > 0n && interval < config.min_interval) {
-      errors.every = `The registry's minimum is ${formatDuration(config.min_interval)}.`;
+    let interval = 0n;
+    let period = 0n;
+    let jobSchedule = sched.interval();
+    if (cadence === "interval") {
+      interval = BigInt(Math.round((Number.isFinite(n) ? n : 0) * UNIT_SECONDS[unit]));
+      period = interval;
+      if (!(n > 0)) errors.every = "Enter a number above zero.";
+      else if (config && config.min_interval > 0n && interval < config.min_interval) {
+        errors.every = `The registry's minimum is ${formatDuration(config.min_interval)}.`;
+      }
+    } else if (cadence === "daily") {
+      jobSchedule = sched.daily(Number(hour), Number(minute));
+      period = 86_400n;
+    } else {
+      jobSchedule = sched.weekly(Number(weekday), Number(hour), Number(minute));
+      period = 604_800n;
     }
+    const after = afterJob.trim();
+    if (after && !/^\d+$/.test(after)) errors.after = "Enter a job id, like 12.";
     const runs = limitRuns ? Number(maxRuns) : 0;
     if (limitRuns && !(Number.isInteger(runs) && runs > 0)) errors.maxRuns = "Enter a whole number above zero.";
     if (endAt && endAt.getTime() <= (startAt ?? new Date()).getTime()) errors.endAt = "Must be after the first run.";
     if (resolver.trim() && !StrKey.isValidContract(resolver.trim())) errors.resolver = "Enter a contract address starting with C.";
-    return { errors, interval, maxRuns: runs };
-  }, [every, unit, limitRuns, maxRuns, startAt, endAt, resolver, config]);
+    return { errors, interval, period, schedule: jobSchedule, maxRuns: runs, after: after ? BigInt(after) : undefined };
+  }, [cadence, every, unit, hour, minute, weekday, afterJob, limitRuns, maxRuns, startAt, endAt, resolver, config]);
 
   const funding = useMemo(() => {
     const errors: Record<string, string> = {};
@@ -150,13 +180,22 @@ export function NewJob() {
     } catch (err) {
       errors.fee = (err as Error).message;
     }
+    let maxFeePerRun = 0n;
+    if (rampFee) {
+      try {
+        maxFeePerRun = parseAmount(maxFee);
+        if (maxFeePerRun < feePerRun) errors.maxFee = "Must be at least the fee per run.";
+      } catch (err) {
+        errors.maxFee = (err as Error).message;
+      }
+    }
     const runs = Number(prepaid);
     if (!(Number.isInteger(runs) && runs > 0)) errors.prepaid = "Prepay at least one run.";
     const deposit = !errors.fee && !errors.prepaid ? depositFor(runs, feePerRun) : 0n;
-    return { errors, feePerRun, runs, deposit };
-  }, [fee, prepaid]);
+    return { errors, feePerRun, maxFeePerRun, runs, deposit };
+  }, [fee, prepaid, rampFee, maxFee]);
 
-  const stepErrors = [action.errors, schedule.errors, funding.errors, {}];
+  const stepErrors = [action.errors, plan.errors, funding.errors, {}];
   const valid = (i: number) => Object.keys(stepErrors[i]).length === 0;
   const show = (errors: Record<string, string>, key: string) => (attempted ? errors[key] : undefined);
 
@@ -164,13 +203,17 @@ export function NewJob() {
     target: action.target,
     function: action.fn,
     args: action.encoded,
-    interval: schedule.interval,
+    interval: plan.interval,
+    schedule: plan.schedule,
     start_at: startAt ? BigInt(Math.floor(startAt.getTime() / 1000)) : 0n,
     fee_per_run: funding.feePerRun,
-    max_runs: schedule.maxRuns,
+    max_fee_per_run: funding.maxFeePerRun,
+    max_runs: plan.maxRuns,
     end_at: endAt ? BigInt(Math.floor(endAt.getTime() / 1000)) : 0n,
     resolver: resolver.trim() || undefined,
+    after: plan.after,
   };
+  const scheduleText = describeSchedule({ schedule: plan.schedule, interval: plan.period });
 
   const next = () => {
     if (!valid(step)) return setAttempted(true);
@@ -322,17 +365,44 @@ export function NewJob() {
 
           {step === 1 && (
             <div className="form">
-              <Field label="Run every" error={show(schedule.errors, "every")} htmlFor="every">
-                <div className="joined">
-                  <TextInput id="every" value={every} onChange={setEvery} inputMode="decimal" />
-                  <Select label="Interval unit" value={unit} options={UNITS} onChange={setUnit} />
-                </div>
-              </Field>
+              <div className="field">
+                <span className="field-label">How often</span>
+                <Segmented
+                  label="How often"
+                  value={cadence}
+                  onChange={setCadence}
+                  options={[
+                    { value: "interval", label: "Every interval" },
+                    { value: "daily", label: "Daily" },
+                    { value: "weekly", label: "Weekly" },
+                  ]}
+                />
+              </div>
+              {cadence === "interval" ? (
+                <Field label="Run every" error={show(plan.errors, "every")} htmlFor="every">
+                  <div className="joined">
+                    <TextInput id="every" value={every} onChange={setEvery} inputMode="decimal" />
+                    <Select label="Interval unit" value={unit} options={UNITS} onChange={setUnit} />
+                  </div>
+                </Field>
+              ) : (
+                <Field label="At" hint="Coordinated Universal Time. Calendar jobs never drift, however late a keeper runs them.">
+                  <div className="calendar-row">
+                    {cadence === "weekly" && (
+                      <Select className="weekday" label="Weekday" value={weekday} options={WEEKDAYS} onChange={setWeekday} />
+                    )}
+                    <Select label="Hour" value={hour} options={HOURS} onChange={setHour} />
+                    <span className="colon">:</span>
+                    <Select label="Minute" value={minute} options={MINUTES} onChange={setMinute} />
+                    <span className="field-hint">UTC</span>
+                  </div>
+                </Field>
+              )}
               <div className="grid-2">
                 <Field label="First run" hint="Leave empty to start right away.">
                   <DatePicker label="First run" value={startAt} onChange={setStartAt} placeholder="Immediately" />
                 </Field>
-                <Field label="Stop after" error={show(schedule.errors, "endAt")} hint="Leave empty to run until funds or runs are used up.">
+                <Field label="Stop after" error={show(plan.errors, "endAt")} hint="Leave empty to run until funds or runs are used up.">
                   <DatePicker label="Stop after" value={endAt} onChange={setEndAt} placeholder="No end date" />
                 </Field>
               </div>
@@ -340,7 +410,7 @@ export function NewJob() {
                 <Switch checked={limitRuns} onChange={setLimitRuns} label="Limit the number of runs" />
                 {limitRuns && (
                   <div className="nested">
-                    <Field label="Maximum runs" error={show(schedule.errors, "maxRuns")} htmlFor="maxRuns">
+                    <Field label="Maximum runs" error={show(plan.errors, "maxRuns")} htmlFor="maxRuns">
                       <TextInput id="maxRuns" value={maxRuns} onChange={setMaxRuns} inputMode="numeric" placeholder="12" />
                     </Field>
                   </div>
@@ -350,10 +420,20 @@ export function NewJob() {
                 <Field
                   label="Resolver contract"
                   htmlFor="resolver"
-                  error={show(schedule.errors, "resolver")}
+                  error={show(plan.errors, "resolver")}
                   hint="A contract exposing should_run(job_id) -> bool. The job runs only when it returns true."
                 >
                   <TextInput id="resolver" mono value={resolver} onChange={setResolver} placeholder="C…" />
+                </Field>
+              </Disclosure>
+              <Disclosure title="Run after another job">
+                <Field
+                  label="Job it follows"
+                  htmlFor="after"
+                  error={show(plan.errors, "after")}
+                  hint="This job then runs once after each new run of that job, for example harvest, then compound."
+                >
+                  <TextInput id="after" value={afterJob} onChange={setAfterJob} inputMode="numeric" placeholder="Job id" />
                 </Field>
               </Disclosure>
             </div>
@@ -368,6 +448,21 @@ export function NewJob() {
                 <Field label="Runs to prepay" error={show(funding.errors, "prepaid")} hint="You can add more or withdraw later." htmlFor="prepaid">
                   <TextInput id="prepaid" value={prepaid} onChange={setPrepaid} inputMode="numeric" />
                 </Field>
+              </div>
+              <div className="field">
+                <Switch checked={rampFee} onChange={setRampFee} label="Pay more when a run is late" />
+                {rampFee && (
+                  <div className="nested">
+                    <Field
+                      label="Highest fee"
+                      htmlFor="maxFee"
+                      error={show(funding.errors, "maxFee")}
+                      hint="The fee rises from the base fee when a run is due to this once it is a full interval late, so keepers prioritise it."
+                    >
+                      <TextInput id="maxFee" value={maxFee} onChange={setMaxFee} inputMode="decimal" suffix="XLM" placeholder="0.5" />
+                    </Field>
+                  </div>
+                )}
               </div>
               <div className="quick">
                 {[10, 24, 100, 365].map((n) => (
@@ -386,7 +481,7 @@ export function NewJob() {
                 <div>
                   <span className="schedule-label">Covers</span>
                   <div className="big-figure small">
-                    {funding.runs > 0 && schedule.interval > 0n ? `about ${formatDuration(schedule.interval * BigInt(funding.runs))}` : "—"}
+                    {funding.runs > 0 && plan.period > 0n ? `about ${formatDuration(plan.period * BigInt(funding.runs))}` : "—"}
                   </div>
                 </div>
               </div>
@@ -412,8 +507,8 @@ export function NewJob() {
               <ReviewSection title="Schedule" onEdit={() => goTo(1)}>
                 <dl className="facts">
                   <div>
-                    <dt>Every</dt>
-                    <dd>{formatDuration(params.interval)}</dd>
+                    <dt>Runs</dt>
+                    <dd>{scheduleText.charAt(0).toUpperCase() + scheduleText.slice(1)}</dd>
                   </div>
                   <div>
                     <dt>First run</dt>
@@ -424,20 +519,29 @@ export function NewJob() {
                     <dd>{endAt ? formatDateTime(endAt) : "No end date"}</dd>
                   </div>
                   <div>
-                    <dt>Runs</dt>
-                    <dd>{params.max_runs ? `At most ${params.max_runs}` : "No limit"}</dd>
+                    <dt>Limit</dt>
+                    <dd>{params.max_runs ? `At most ${params.max_runs} runs` : "No limit"}</dd>
                   </div>
                   <div>
                     <dt>Condition</dt>
                     <dd>{params.resolver ? <span className="mono">{params.resolver.slice(0, 8)}…</span> : "None"}</dd>
                   </div>
+                  {params.after != null && (
+                    <div>
+                      <dt>Follows</dt>
+                      <dd>Job #{String(params.after)}</dd>
+                    </div>
+                  )}
                 </dl>
               </ReviewSection>
               <ReviewSection title="Funding" onEdit={() => goTo(2)}>
                 <dl className="facts">
                   <div>
                     <dt>Fee per run</dt>
-                    <dd>{formatAmount(params.fee_per_run)} XLM</dd>
+                    <dd>
+                      {formatAmount(params.fee_per_run)} XLM
+                      {params.max_fee_per_run ? `, up to ${formatAmount(params.max_fee_per_run)} when late` : ""}
+                    </dd>
                   </div>
                   <div>
                     <dt>Deposit</dt>

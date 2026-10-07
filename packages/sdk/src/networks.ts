@@ -6,7 +6,7 @@
 import { Networks } from "@stellar/stellar-sdk";
 
 export interface NetworkConfig {
-  name: "testnet" | "mainnet";
+  name: "testnet" | "mainnet" | "local";
   rpcUrl: string;
   networkPassphrase: string;
   explorer: string;

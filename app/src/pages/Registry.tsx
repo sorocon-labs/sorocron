@@ -1,7 +1,7 @@
 import { ERRORS, formatAmount, formatDuration } from "@sorocron/sdk";
 import { Icon, type IconName } from "../components/Icon";
 import { Address, Badge, Card, Facts, PageHeader, Skeleton } from "../components/ui";
-import { NETWORK, useRegistry } from "../state/registry";
+import { DOCS_URL, NETWORK, REPO_URL, useRegistry } from "../state/registry";
 
 const CONTRACTS: [string, string | undefined, string][] = [
   ["Registry", NETWORK.contracts.registry, "Jobs, escrow, keeper stakes and admin"],
@@ -13,15 +13,14 @@ const CONTRACTS: [string, string | undefined, string][] = [
 ];
 
 const LINKS: [IconName, string, string, string][] = [
-  ["book", "Architecture", "How scheduling, resolvers and the TTL Guardian work", "docs/architecture.md"],
-  ["shield", "Security model", "Why targets are called through a fund-less executor", "docs/security.md"],
-  ["code", "TypeScript SDK", "Typed client used by this app", "packages/sdk"],
-  ["keeper", "Keeper node", "Run your own keeper", "keeper-bot"],
+  ["book", "Architecture", "How scheduling, resolvers and the TTL Guardian work", `${DOCS_URL}architecture.html`],
+  ["shield", "Security model", "Why targets are called through a fund-less executor", `${DOCS_URL}security.html`],
+  ["code", "TypeScript SDK", "Typed client used by this app", `${DOCS_URL}reference/sdk.html`],
+  ["keeper", "Keeper node", "Run your own keeper", `${DOCS_URL}reference/keeper.html`],
 ];
 
 export function Registry() {
   const { config, version, cron } = useRegistry();
-  const repo = "https://github.com/sorocon-labs/sorocron";
 
   return (
     <>
@@ -39,6 +38,16 @@ export function Registry() {
                 ["Unbonding period", formatDuration(config.unbonding_period)],
                 ["Minimum interval", config.min_interval > 0n ? formatDuration(config.min_interval) : "None"],
                 ["Maximum arguments", config.max_args > 0 ? config.max_args.toString() : "No limit"],
+                [
+                  "Protocol fee",
+                  config.protocol_fee_bps ? `${config.protocol_fee_bps / 100}% of each fee` : "None",
+                ],
+                [
+                  "Assigned keeper windows",
+                  config.grace_period ? `${formatDuration(config.grace_period)}, slashing ${(config.slash_bps ?? 0) / 100}%` : "Off",
+                ],
+                ["Pause after failures", config.max_failures ? `${config.max_failures} in a row` : "Never"],
+                ["Unbonding epochs", config.unbonding_epoch ? formatDuration(config.unbonding_epoch) : "Off"],
                 ["Executor", config.executor ? <Address key="e" value={config.executor} /> : "Not connected"],
               ]}
             />
@@ -57,7 +66,13 @@ export function Registry() {
           />
           <p className="note">
             <Icon name="info" size={15} />
-            Testnet is reset periodically; addresses are kept current in the repository.
+            <span>
+              Testnet is reset periodically; the current addresses are always in{" "}
+              <a className="mono" href={`${REPO_URL}/blob/main/deployments/testnet.json`} target="_blank" rel="noreferrer">
+                deployments/testnet.json
+              </a>
+              .
+            </span>
           </p>
         </Card>
 
@@ -93,9 +108,9 @@ export function Registry() {
 
         <Card title="Learn more" className="fill-md">
           <ul className="links">
-            {LINKS.map(([icon, title, body, path]) => (
+            {LINKS.map(([icon, title, body, href]) => (
               <li key={title}>
-                <a href={`${repo}/${path.includes(".") ? "blob" : "tree"}/main/${path}`} target="_blank" rel="noreferrer">
+                <a href={href} target="_blank" rel="noreferrer">
                   <span className="choice-icon">
                     <Icon name={icon} size={16} />
                   </span>

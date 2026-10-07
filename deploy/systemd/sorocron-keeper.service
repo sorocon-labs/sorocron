@@ -1,0 +1,50 @@
+# SoroCron keeper as a systemd service.
+#
+#   sudo useradd --system --home /opt/sorocron --shell /usr/sbin/nologin sorocron
+#   sudo cp sorocron-keeper.service /etc/systemd/system/
+#   sudo install -m 600 -o sorocron keeper.env /etc/sorocron/keeper.env
+#   sudo systemctl enable --now sorocron-keeper
+#   journalctl -u sorocron-keeper -f
+#
+# Expects the repository at /opt/sorocron, built with:
+#   npm ci && npm run build -w @sorocron/sdk && npm run build -w sorocron-keeper-bot
+
+[Unit]
+Description=SoroCron keeper node
+Documentation=https://github.com/sorocon-labs/sorocron/blob/main/docs/guides/keeper-deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sorocron
+Group=sorocron
+WorkingDirectory=/opt/sorocron/keeper-bot
+EnvironmentFile=/etc/sorocron/keeper.env
+Environment=NODE_ENV=production LOG_FORMAT=json METRICS_PORT=9464
+ExecStart=/usr/bin/node dist/keeper.js
+Restart=always
+RestartSec=10
+# SIGTERM stops the loop after the current tick.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+# Hardening: the keeper needs network access and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+ReadOnlyPaths=/opt/sorocron
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

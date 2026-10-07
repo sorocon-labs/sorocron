@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatAmount, formatDuration, jobStatus, runsRemaining, type Job } from "@sorocron/sdk";
+import { currentFee, describeSchedule, formatAmount, formatDuration, jobStatus, runsRemaining, type Job } from "@sorocron/sdk";
 import { Icon } from "../components/Icon";
 import { Address, Badge, Button, Card, Empty, Facts, Meter, PageHeader, Skeleton, StatusBadge, relative } from "../components/ui";
 import { Modal } from "../components/Modal";
@@ -101,7 +101,13 @@ export function JobDetail({ id }: { id: bigint }) {
           <Meter value={Number(left)} max={Math.max(Number(left), 10)} label="Runs funded" />
           <Facts
             items={[
-              ["Fee per run", `${formatAmount(job.fee_per_run)} XLM`],
+              [
+                "Fee per run",
+                job.max_fee_per_run
+                  ? `${formatAmount(job.fee_per_run)} to ${formatAmount(job.max_fee_per_run)} XLM`
+                  : `${formatAmount(job.fee_per_run)} XLM`,
+              ],
+              ...(job.max_fee_per_run ? ([["Fee if run now", `${formatAmount(currentFee(job, now))} XLM`]] as [string, string][]) : []),
               ["Runs funded", left.toString()],
               ["Lasts about", left > 0n ? formatDuration(job.interval * left) : "—"],
             ]}
@@ -115,7 +121,28 @@ export function JobDetail({ id }: { id: bigint }) {
               ["Runs", job.max_runs ? `${job.runs} of ${job.max_runs}` : `${job.runs}, no limit`],
               ["Ends", job.end_at ? relative(job.end_at, now) : "Never"],
               ["Resolver", job.resolver ? <Address key="r" value={job.resolver} /> : "None"],
-              ["State", job.active ? <Badge key="s" tone="green">Active</Badge> : <Badge key="s" tone="gray">Paused by owner</Badge>],
+              [
+                "Follows",
+                job.after != null ? (
+                  <Link key="a" to={{ name: "job", id: BigInt(job.after) }}>
+                    Job #{String(job.after)}
+                  </Link>
+                ) : (
+                  "No other job"
+                ),
+              ],
+              ["Keepers", job.keepers?.length ? `${job.keepers.length} allowed` : "Any staked keeper"],
+              ["Failed in a row", String(job.failures ?? 0)],
+              [
+                "State",
+                job.active ? (
+                  <Badge key="s" tone="green">Active</Badge>
+                ) : (job.failures ?? 0) > 0 ? (
+                  <Badge key="s" tone="red">Paused after failures</Badge>
+                ) : (
+                  <Badge key="s" tone="gray">Paused by owner</Badge>
+                ),
+              ],
             ]}
           />
         </Card>
@@ -261,8 +288,8 @@ function ScheduleCard({ job, now }: { job: Job; now: bigint }) {
           </div>
         </div>
         <div>
-          <div className="schedule-label">Every</div>
-          <div className="big-figure">{formatDuration(job.interval)}</div>
+          <div className="schedule-label">Runs</div>
+          <div className="big-figure small-text">{describeSchedule(job)}</div>
           <div className="muted-cell">{job.runs === 1 ? "1 run" : `${job.runs} runs`} so far</div>
         </div>
       </div>
@@ -294,6 +321,8 @@ function explain(status: string): string {
   switch (status) {
     case "paused":
       return "Paused by its owner";
+    case "failing":
+      return "Paused itself after failed runs; the owner can resume it";
     case "underfunded":
       return "Balance can't cover another run";
     case "expired":
