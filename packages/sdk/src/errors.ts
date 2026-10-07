@@ -82,6 +82,16 @@ export function parseContractError(input: unknown): SoroCronError | undefined {
       if (code) break;
     }
   }
+  if (!code && input && typeof input === "object") {
+    const obj = input as Record<string, unknown>;
+    if (typeof obj.value === "number" && obj.value in ERRORS) {
+      code = obj.value as ErrorCode;
+    } else if (typeof obj.code === "number" && obj.code in ERRORS) {
+      code = obj.code as ErrorCode;
+    } else if (typeof obj.name === "string" && BY_NAME.has(obj.name)) {
+      code = BY_NAME.get(obj.name);
+    }
+  }
   if (!code) return undefined;
   const [errorName, message] = ERRORS[code];
   return new SoroCronError(code, errorName, message);

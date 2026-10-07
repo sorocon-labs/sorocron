@@ -74,6 +74,16 @@ export class SoroCron {
       signAuthEntry: options.signAuthEntry,
       allowHttp: options.network.rpcUrl.startsWith("http://"),
     });
+    if (client.spec && typeof client.spec.errorCases === "function") {
+      for (const errorCase of client.spec.errorCases()) {
+        if (!errorCase.doc || !errorCase.doc.toString()) {
+          const name = errorCase.name?.toString?.() ?? "";
+          (errorCase as any).doc = {
+            toString: () => name,
+          };
+        }
+      }
+    }
     return new SoroCron(
       client as contract.Client & Record<string, Method>,
       contractId,
@@ -314,7 +324,14 @@ export function unwrapResult<T>(value: unknown): T {
     const result = value as { isErr(): boolean; unwrap(): T; unwrapErr(): unknown };
     if (result.isErr()) {
       const err = result.unwrapErr();
-      throw parseContractError(err) ?? new Error(`Contract error: ${JSON.stringify(err)}`);
+      const parsed = parseContractError(err);
+      if (parsed) throw parsed;
+      const msg =
+        (err as any)?.message ||
+        (err as any)?.name ||
+        (err as any)?.code ||
+        JSON.stringify(err);
+      throw new Error(`Contract error: ${msg}`);
     }
     return result.unwrap();
   }
