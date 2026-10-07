@@ -44,10 +44,10 @@ The source of truth for these addresses is [`deployments/testnet.json`](deployme
 
 | Contract | Address |
 |---|---|
-| Registry | [`CDOAY46V2REWSINTZINUKTYELO5FYVEOCFWEKVMGH4BUJPSTRZTRGQ5W`](https://stellar.expert/explorer/testnet/contract/CDOAY46V2REWSINTZINUKTYELO5FYVEOCFWEKVMGH4BUJPSTRZTRGQ5W) |
-| Executor | [`CBRQANLQBDWDUM5GRQBP7T3VZBOXG6EZEKNRNYMXTFAYWSDSJL6PPAFA`](https://stellar.expert/explorer/testnet/contract/CBRQANLQBDWDUM5GRQBP7T3VZBOXG6EZEKNRNYMXTFAYWSDSJL6PPAFA) |
-| TTL Guardian | [`CB3KQFXKCL4SEBQTDGCZHJLBX365ORTHQY724SCETVS2GYZCXPGGLE73`](https://stellar.expert/explorer/testnet/contract/CB3KQFXKCL4SEBQTDGCZHJLBX365ORTHQY724SCETVS2GYZCXPGGLE73) |
-| Example target (counter) | [`CDAJHPUZX55DPNTABY5OTXJYK27XWS6V744BLS5LPWMOTTI7LERGJWU2`](https://stellar.expert/explorer/testnet/contract/CDAJHPUZX55DPNTABY5OTXJYK27XWS6V744BLS5LPWMOTTI7LERGJWU2) |
+| Registry | [`CDQPGH3YKV22VYFCZ4WUSOWFBM26PZDCTATCNBRUKLOUYAIJWDCQ6PE4`](https://stellar.expert/explorer/testnet/contract/CDQPGH3YKV22VYFCZ4WUSOWFBM26PZDCTATCNBRUKLOUYAIJWDCQ6PE4) |
+| Executor | [`CA7YGKMX4OZYNRMQWTLYZSG2WC52OWOCSV4XIQ75SX5LIRISTQIWMLCV`](https://stellar.expert/explorer/testnet/contract/CA7YGKMX4OZYNRMQWTLYZSG2WC52OWOCSV4XIQ75SX5LIRISTQIWMLCV) |
+| TTL Guardian | [`CB7GKJSFY7PIESJW7JEPH4HHOAJ5XOCESWJPPWDGZ4REEQ2Y72YCDFGP`](https://stellar.expert/explorer/testnet/contract/CB7GKJSFY7PIESJW7JEPH4HHOAJ5XOCESWJPPWDGZ4REEQ2Y72YCDFGP) |
+| Example target (counter) | [`CBYUUVNSCHQ7Q4X5XCPOP76UBDEXA6LO54F27LLXAZH5VMNXIN73MB7W`](https://stellar.expert/explorer/testnet/contract/CBYUUVNSCHQ7Q4X5XCPOP76UBDEXA6LO54F27LLXAZH5VMNXIN73MB7W) |
 | Example resolver (flag) | [`CDYKTISS6TCWDPE2NJ5YVD3FJU6ULCZXLMSQE32XQTIICMCVDDIGHWXO`](https://stellar.expert/explorer/testnet/contract/CDYKTISS6TCWDPE2NJ5YVD3FJU6ULCZXLMSQE32XQTIICMCVDDIGHWXO) |
 
 Fee and stake token: native XLM. Min keeper stake: 1 XLM. Unbonding: 1 hour.
@@ -158,7 +158,7 @@ key management, see [Running a keeper in production](docs/guides/keeper-deployme
 No Stellar CLI is needed; the scripts use `@stellar/stellar-sdk`. With the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) you can call the registry directly:
 
 ```bash
-stellar contract invoke --id CDOAY46V2REWSINTZINUKTYELO5FYVEOCFWEKVMGH4BUJPSTRZTRGQ5W --network testnet -- job_count
+stellar contract invoke --id CDQPGH3YKV22VYFCZ4WUSOWFBM26PZDCTATCNBRUKLOUYAIJWDCQ6PE4 --network testnet -- job_count
 ```
 
 A `stellar contract invoke` example for every registry function is in [docs/cli.md](docs/cli.md).

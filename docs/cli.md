@@ -25,8 +25,8 @@ stellar keys generate me --network testnet --fund
 ME=$(stellar keys address me)
 
 # The registry from deployments/testnet.json.
-REG=CDOAY46V2REWSINTZINUKTYELO5FYVEOCFWEKVMGH4BUJPSTRZTRGQ5W
-COUNTER=CDAJHPUZX55DPNTABY5OTXJYK27XWS6V744BLS5LPWMOTTI7LERGJWU2
+REG=CDQPGH3YKV22VYFCZ4WUSOWFBM26PZDCTATCNBRUKLOUYAIJWDCQ6PE4
+COUNTER=CBYUUVNSCHQ7Q4X5XCPOP76UBDEXA6LO54F27LLXAZH5VMNXIN73MB7W
 ```
 
 Every `invoke` below takes `--id $REG --source me --network testnet`. Read-only
@@ -236,7 +236,7 @@ which already has its executor connected.
 
 ```bash
 stellar contract invoke --id $REG --source me --network testnet --send=yes -- \
-  set_executor --executor CBRQANLQBDWDUM5GRQBP7T3VZBOXG6EZEKNRNYMXTFAYWSDSJL6PPAFA
+  set_executor --executor CA7YGKMX4OZYNRMQWTLYZSG2WC52OWOCSV4XIQ75SX5LIRISTQIWMLCV
 ```
 
 ### propose_admin / pending_admin / cancel_admin_proposal / accept_admin
