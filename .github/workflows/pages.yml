@@ -1,15 +1,19 @@
 name: Deploy site
 
-# Publishes the dashboard (app/) at the site root and the documentation book
-# (book/, issue #55) under /docs/ on every push to main. One-time setup:
+# Publishes the dashboard (app/) at the site root, the documentation book
+# (book/, issue #55) under /docs/ and the coverage badge (#53) at
+# /coverage.json, whenever CI passes on main. One-time setup:
 # Settings -> Pages -> Source: "GitHub Actions".
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -19,12 +23,16 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The commit CI just passed (the branch head for manual runs).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -44,6 +52,20 @@ jobs:
           cp -r book/build app/dist/docs
         env:
           MDBOOK_OUTPUT__HTML__SITE_URL: /${{ github.event.repository.name }}/docs/
+      - name: Coverage badge from CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          # Manual runs use the latest CI run that passed on main.
+          latest() {
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main \
+              --status success --limit 1 --json databaseId --jq '.[0].databaseId'
+          }
+          run=${RUN_ID:-$(latest)}
+          if ! gh run download "$run" --repo "$GITHUB_REPOSITORY" --name coverage-badge --dir app/dist; then
+            echo "::warning::CI run $run has no coverage badge; the README badge keeps its last value."
+          fi
       - uses: actions/upload-pages-artifact@v5
         with:
           path: app/dist

@@ -88,6 +88,8 @@ jobs:
         run: |
           ignore='(^|/)(test[^/]*|proptests|invariants)\.rs$|contracts/(testkit|bench)/'
           cargo llvm-cov report --ignore-filename-regex "$ignore" --lcov --output-path lcov.info
+          cargo llvm-cov report --ignore-filename-regex "$ignore" --json --summary-only --output-path summary.json
+          python3 scripts/coverage-badge.py summary.json coverage.json
           {
             echo '### Contract coverage'
             echo '```'
@@ -98,8 +100,13 @@ jobs:
         with:
           name: coverage-lcov
           path: lcov.info
-      # Feeds the README badge. Needs a CODECOV_TOKEN secret; without one
-      # the upload is skipped and the job still passes.
+      # The README badge. The docs site deploy picks it up from this run.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-badge
+          path: coverage.json
+      # Optional: also send the report to Codecov when a CODECOV_TOKEN
+      # secret is set; without one the upload is skipped.
       - uses: codecov/codecov-action@v7
         if: env.CODECOV_TOKEN != ''
         with:
@@ -110,8 +117,9 @@ jobs:
   e2e:
     name: End to end on a local network
     # Deploys the contracts to a fresh stellar/quickstart network, then runs
-    # the demo (stake, create two jobs, execute both), the CLI and a keeper
-    # pass, so the contracts, SDK, CLI and keeper are checked together.
+    # the demo (stake, create two jobs, execute both), the CLI, a keeper pass
+    # and a second keeper's stake lifecycle, so the contracts, SDK, CLI and
+    # keeper are checked together.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -148,6 +156,9 @@ jobs:
           exit 1
       - name: Deploy
         run: npm run deploy -w sorocron-keeper-bot
+        env:
+          # Short enough for the stake lifecycle below to withdraw.
+          UNBONDING_PERIOD_SECONDS: 15
       - name: Demo (fails unless both jobs run)
         run: npm run demo -w sorocron-keeper-bot
       - name: CLI
@@ -164,6 +175,8 @@ jobs:
             echo "::error::The keeper didn't execute the counter job"
             exit 1
           }
+      - name: Keeper stake lifecycle with the CLI (register, top up, unbond, withdraw)
+        run: bash scripts/e2e-keeper-cli.sh
       - name: Network logs
         if: failure()
         run: docker logs --tail 200 stellar

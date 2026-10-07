@@ -3,7 +3,7 @@
 **Decentralized automation for Soroban smart contracts on Stellar.**
 
 [![CI](https://github.com/sorocon-labs/sorocron/actions/workflows/ci.yml/badge.svg)](https://github.com/sorocon-labs/sorocron/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/sorocon-labs/sorocron/branch/main/graph/badge.svg)](https://codecov.io/gh/sorocon-labs/sorocron)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fsorocon-labs.github.io%2Fsorocron%2Fcoverage.json)](https://github.com/sorocon-labs/sorocron/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-mdBook-informational)](https://sorocon-labs.github.io/sorocron/docs/)
 ![Soroban SDK](https://img.shields.io/badge/soroban--sdk-28.0.0-blue)
 ![Version](https://img.shields.io/badge/version-0.3.0-orange)
@@ -38,7 +38,9 @@ SoroCron replaces those servers with an open network:
 | 🧰 **TypeScript SDK and React hooks** | Typed client, schedule and argument builders, readable errors, event reading ([`@sorocron/sdk`](packages/sdk), [`@sorocron/react`](packages/react)) |
 | 📚 **Docs, tutorials and examples** | A [documentation site](https://sorocon-labs.github.io/sorocron/docs/), DCA and limit-order tutorials, and 14 example contracts ([`contracts/examples`](contracts/examples)) |
 
-## Live on testnet (v0.2.0)
+## Live on testnet
+
+The source of truth for these addresses is [`deployments/testnet.json`](deployments/testnet.json). The [release workflow](.github/workflows/release.yml) redeploys testnet on every release and whenever Stellar resets it, and opens a pull request with the new addresses.
 
 | Contract | Address |
 |---|---|

@@ -5,6 +5,7 @@
  *   npm run cli -- jobs list
  *   npm run cli -- jobs create --target C... --function increment --arg u32:1 --every 1h --fee 0.1 --runs 24
  *   npm run cli -- keeper stake 100
+ *   npm run cli -- keeper topup --to 100
  *
  * Reads STELLAR_SECRET_KEY, STELLAR_NETWORK and the registry address from
  * keeper-bot/.env and deployments/<network>.json, like the keeper. Read-only
@@ -27,6 +28,7 @@ import {
 import { EXPLORER, connect, keypairFromEnv, networkConfig } from "./config.js";
 import { details, table } from "./format.js";
 import { parseArgSpec, parseDaily, parseDuration, parseTime, parseWeekly } from "./parse.js";
+import { planTopUp } from "./topup.js";
 
 const now = () => BigInt(Math.floor(Date.now() / 1000));
 const xlm = (v: bigint) => `${formatAmount(v)} XLM`;
@@ -209,6 +211,37 @@ keeper
   .action(async (amount: string) => {
     const { hash, result } = await (await client(true)).stake(parseAmount(amount));
     console.log(`Staked. Total stake: ${xlm(result)}.${txLine(hash)}`);
+  });
+
+keeper
+  .command("topup")
+  .description("Stake back up to a target, e.g. after slashing. Does nothing when already there, so it's safe to run from cron")
+  .option("--to <xlm>", "stake to hold (default: the registry minimum)")
+  .option("--max <xlm>", "fail instead of staking more than this")
+  .option("--dry-run", "only show what would be staked")
+  .action(async (o: { to?: string; max?: string; dryRun?: boolean }) => {
+    const cron = await client(true);
+    const who = cron.publicKey!;
+    const [info, config] = await Promise.all([cron.getKeeper(who), cron.config()]);
+    const plan = planTopUp(info, o.to ? parseAmount(o.to) : config.min_stake, o.max ? parseAmount(o.max) : undefined);
+    if (plan.target < config.min_stake) {
+      console.warn(`Note: ${xlm(plan.target)} is below the registry minimum of ${xlm(config.min_stake)}, so the keeper can't execute.`);
+    }
+    if (plan.action === "blocked") {
+      throw new Error(
+        plan.reason === "unbonding"
+          ? "Can't top up while unbonding. Withdraw first, then stake again."
+          : `Reaching ${xlm(plan.target)} needs ${xlm(plan.amount)}, more than --max ${xlm(parseAmount(o.max!))}.`,
+      );
+    }
+    if (plan.action === "none") {
+      return console.log(`Stake is ${xlm(plan.stake)}, already at least ${xlm(plan.target)}. Nothing to do.`);
+    }
+    if (o.dryRun) {
+      return console.log(`Would stake ${xlm(plan.amount)} to bring ${xlm(plan.stake)} up to ${xlm(plan.target)}.`);
+    }
+    const { hash, result } = await cron.stake(plan.amount);
+    console.log(`Topped up ${xlm(plan.amount)}. Total stake: ${xlm(result)}.${txLine(hash)}`);
   });
 
 keeper

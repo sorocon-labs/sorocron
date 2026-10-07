@@ -11,6 +11,7 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - **`upgrade` and `version`**: admin-gated code upgrades that keep storage and address; `version()` returns the interface version (3). ([#11](https://github.com/sorocon-labs/sorocron/issues/11))
 - **`@sorocron/sdk`** (`packages/sdk`): typed TypeScript client, argument builders, schedule helpers and `SoroCronError`. ([#27](https://github.com/sorocon-labs/sorocron/issues/27))
 - **Web dashboard** (`app/`): browse jobs, schedule and manage them with Freighter, stake as a keeper. Deployed to GitHub Pages from `main`. ([#28](https://github.com/sorocon-labs/sorocron/issues/28))
+- **Keeper stake top-ups**: `sorocron keeper topup [--to] [--max] [--dry-run]` stakes back up to a target and does nothing when already there, and `TOPUP_STAKE_TO_XLM` makes the keeper node do it each tick after slashing. The end-to-end CI job now takes a second keeper through register, top up, unbond and withdraw. ([#76](https://github.com/sorocon-labs/sorocron/issues/76))
 - **Keeper observability**: Prometheus `/metrics`, `/healthz` liveness endpoint, `LOG_FORMAT=json`, Docker `HEALTHCHECK`, clean SIGTERM shutdown. ([#25](https://github.com/sorocon-labs/sorocron/issues/25), [#73](https://github.com/sorocon-labs/sorocron/issues/73))
 
 ### Changed
