@@ -100,7 +100,7 @@ jobs:
           path: lcov.info
       # Feeds the README badge. Needs a CODECOV_TOKEN secret; without one
       # the upload is skipped and the job still passes.
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         if: env.CODECOV_TOKEN != ''
         with:
           files: lcov.info
