@@ -12,9 +12,9 @@ default:
 test:
     cargo test
 
-# Build release WASM contracts.
+# Build release WASM contracts (needs stellar-cli 25.2+, see CONTRIBUTING.md).
 build:
-    cargo build --release --target wasm32v1-none
+    stellar contract build
 
 # Format and lint the contracts (matches CI).
 lint:
