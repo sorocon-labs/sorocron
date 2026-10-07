@@ -129,6 +129,7 @@ fn sample_job(env: &Env) -> (JobSpec, JobState) {
         end_at: 0,
         resolver: None,
         keepers: None,
+        after: None,
     };
     let state = JobState {
         next_run: 0,
@@ -136,6 +137,7 @@ fn sample_job(env: &Env) -> (JobSpec, JobState) {
         runs: 0,
         failures: 0,
         active: true,
+        leader_runs: 0,
     };
     (spec, state)
 }

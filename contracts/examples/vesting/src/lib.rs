@@ -257,3 +257,50 @@ mod test {
         assert_eq!(token_client.balance(&beneficiary), 1000);
     }
 }
+
+/// Vesting released by a SoroCron job, end to end through the registry (#19).
+#[cfg(test)]
+mod registry_integration {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, vec, IntoVal};
+    use sorocron_testkit::Harness;
+
+    const TOTAL: i128 = 1_200_000;
+    const MONTH: u64 = 30 * 86_400;
+
+    #[test]
+    fn monthly_job_releases_vested_tokens_to_the_beneficiary() {
+        let h = Harness::new();
+        let vesting = VestingContractClient::new(
+            &h.env,
+            &h.env
+                .register(VestingContract, (h.owner.clone(), h.token.address.clone())),
+        );
+        let beneficiary = Address::generate(&h.env);
+        let start = h.env.ledger().timestamp();
+        // 12-month linear vesting with a 1-month cliff, funded by the owner.
+        vesting.create_schedule(&beneficiary, &TOTAL, &start, &MONTH, &(12 * MONTH), &false);
+
+        let mut p = h.params(
+            &vesting.address,
+            "release_vested",
+            vec![&h.env, beneficiary.into_val(&h.env)],
+            MONTH,
+        );
+        p.start_at = start + MONTH; // first release at the cliff
+        let job = h.create(&p);
+
+        let mut last = 0;
+        for month in 1..=4u64 {
+            h.env.ledger().set_timestamp(start + month * MONTH);
+            h.run(job);
+            let balance = h.token.balance(&beneficiary);
+            assert!(balance > last, "month {month}: nothing released");
+            assert_eq!(balance, TOTAL * month as i128 / 12);
+            last = balance;
+        }
+        assert_eq!(h.job(job).runs, 4);
+    }
+
+    use soroban_sdk::testutils::Ledger;
+}

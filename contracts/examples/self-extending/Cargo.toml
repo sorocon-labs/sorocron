@@ -1,6 +1,6 @@
 [package]
-name = "sorocron-example-subscription"
-description = "Example SoroCron job target: Recurring subscription pull payment contract"
+name = "sorocron-example-self-extending"
+description = "SoroCron example: Contract that keeps its own persistent storage alive through a scheduled extend_ttl job"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

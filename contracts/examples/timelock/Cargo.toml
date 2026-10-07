@@ -1,6 +1,6 @@
 [package]
-name = "sorocron-example-subscription"
-description = "Example SoroCron job target: Recurring subscription pull payment contract"
+name = "sorocron-example-timelock"
+description = "SoroCron example: DAO timelock whose queued calls a keeper executes once their ETA passes"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

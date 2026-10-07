@@ -140,6 +140,7 @@ pub fn job_view(id: u64, spec: JobSpec, state: JobState) -> Job {
         end_at: spec.end_at,
         resolver: spec.resolver,
         keepers: spec.keepers,
+        after: spec.after,
         active: state.active,
         failures: state.failures,
     }

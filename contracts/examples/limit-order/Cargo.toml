@@ -1,6 +1,6 @@
 [package]
-name = "sorocron-example-subscription"
-description = "Example SoroCron job target: Recurring subscription pull payment contract"
+name = "sorocron-example-limit-order"
+description = "SoroCron example: Limit order that fills through a Soroswap-compatible router once the price is good enough"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

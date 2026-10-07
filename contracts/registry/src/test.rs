@@ -147,6 +147,7 @@ pub(crate) fn params(s: &Setup) -> JobParams {
         schedule: Schedule::Interval,
         max_fee_per_run: 0,
         keepers: None,
+        after: None,
     }
 }
 
@@ -1466,6 +1467,7 @@ pub(crate) fn update_from(s: &Setup, job_id: u64) -> JobUpdate {
         schedule: job.schedule,
         max_fee_per_run: job.max_fee_per_run,
         keepers: job.keepers,
+        after: job.after,
     }
 }
 

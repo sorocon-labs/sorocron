@@ -10,6 +10,15 @@ members = [
     "contracts/examples/vesting",
     "contracts/examples/subscription",
     "contracts/examples/oracle-trigger",
+    "contracts/examples/price-resolver",
+    "contracts/examples/self-extending",
+    "contracts/examples/timelock",
+    "contracts/examples/timelock-resolver",
+    "contracts/examples/composite-resolver",
+    "contracts/examples/rebalance-resolver",
+    "contracts/examples/nft-floor-trigger",
+    "contracts/examples/limit-order",
+    "contracts/testkit",
     "contracts/bench",
 ]
 # The benchmark loads the built WASM, so plain `cargo test` / `cargo build`
@@ -24,6 +33,15 @@ default-members = [
     "contracts/examples/vesting",
     "contracts/examples/subscription",
     "contracts/examples/oracle-trigger",
+    "contracts/examples/price-resolver",
+    "contracts/examples/self-extending",
+    "contracts/examples/timelock",
+    "contracts/examples/timelock-resolver",
+    "contracts/examples/composite-resolver",
+    "contracts/examples/rebalance-resolver",
+    "contracts/examples/nft-floor-trigger",
+    "contracts/examples/limit-order",
+    "contracts/testkit",
 ]
 
 [workspace.package]

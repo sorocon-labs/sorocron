@@ -1,6 +1,6 @@
 [package]
-name = "sorocron-example-subscription"
-description = "Example SoroCron job target: Recurring subscription pull payment contract"
+name = "sorocron-example-timelock-resolver"
+description = "SoroCron example: Resolver that opens a job only inside a governance proposal's execution window"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

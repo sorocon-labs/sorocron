@@ -1,6 +1,6 @@
 [package]
-name = "sorocron-example-subscription"
-description = "Example SoroCron job target: Recurring subscription pull payment contract"
+name = "sorocron-example-price-resolver"
+description = "SoroCron example: Resolver that lets a job run only when a Reflector oracle price crosses a threshold"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -74,6 +74,9 @@ pub struct JobParams {
     pub resolver: Option<Address>,
     /// Keepers allowed to run the job. `None` lets any staked keeper.
     pub keepers: Option<Vec<Address>>,
+    /// Another job this one follows: it is due only after that job has run
+    /// again since this one last ran (for example harvest, then compound).
+    pub after: Option<u64>,
 }
 
 /// Input to `update_job`. Replaces every mutable setting of a job at once;
@@ -95,6 +98,7 @@ pub struct JobUpdate {
     pub end_at: u64,
     pub resolver: Option<Address>,
     pub keepers: Option<Vec<Address>>,
+    pub after: Option<u64>,
 }
 
 /// A job as returned by the views: its settings and its current state.
@@ -121,6 +125,7 @@ pub struct Job {
     pub end_at: u64,
     pub resolver: Option<Address>,
     pub keepers: Option<Vec<Address>>,
+    pub after: Option<u64>,
     /// `false` while paused, by the owner or after `max_failures` failures.
     pub active: bool,
     /// Consecutive runs whose target call failed. Reset by a successful run.
@@ -144,6 +149,7 @@ pub struct JobSpec {
     pub end_at: u64,
     pub resolver: Option<Address>,
     pub keepers: Option<Vec<Address>>,
+    pub after: Option<u64>,
 }
 
 /// The part of a job that changes on every run.
@@ -155,6 +161,8 @@ pub struct JobState {
     pub runs: u32,
     pub failures: u32,
     pub active: bool,
+    /// For jobs with `after`: that job's run count when this one last ran.
+    pub leader_runs: u32,
 }
 
 #[contracttype]

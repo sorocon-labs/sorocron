@@ -1,0 +1,13 @@
+[package]
+name = "sorocron-testkit"
+description = "Test harness for contracts automated by SoroCron: a registry, executor, fee token and staked keeper in one call"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+sorocron-registry = { path = "../registry" }
+sorocron-executor = { path = "../executor" }

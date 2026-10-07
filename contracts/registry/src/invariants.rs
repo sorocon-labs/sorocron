@@ -235,6 +235,7 @@ fn apply(w: &World, op: &Op) -> Result<(), TestCaseError> {
                 end_at: 0,
                 resolver: None,
                 keepers: None,
+                after: None,
             };
             allowed!(w
                 .cron

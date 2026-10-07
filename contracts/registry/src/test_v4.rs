@@ -703,6 +703,32 @@ fn execute_rewrites_only_the_small_state_entry() {
 }
 
 #[test]
+fn job_state_view_matches_the_full_job() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &1_000);
+    s.cron.execute(&s.keeper, &id);
+    let job = s.cron.get_job(&id).unwrap();
+    let state = s.cron.get_job_state(&id).unwrap();
+    assert_eq!(
+        (
+            state.next_run,
+            state.balance,
+            state.runs,
+            state.failures,
+            state.active
+        ),
+        (
+            job.next_run,
+            job.balance,
+            job.runs,
+            job.failures,
+            job.active
+        )
+    );
+    assert_eq!(s.cron.get_job_state(&99), None);
+}
+
+#[test]
 fn job_view_combines_spec_and_state() {
     let s = setup();
     let mut p = params(&s);
@@ -803,4 +829,91 @@ fn upgrade_to_real_wasm_preserves_state() {
     advance(&s.env, INTERVAL);
     s.cron.execute(&s.keeper, &id);
     assert_eq!(s.cron.get_job(&id).unwrap().runs, 2);
+}
+
+// ---------------------------------------------------------------------------
+// #44 Job chaining: run B after A
+// ---------------------------------------------------------------------------
+
+#[test]
+fn follower_runs_once_per_run_of_its_leader() {
+    let s = setup();
+    let harvest = s.cron.create_job(&s.owner, &params(&s), &1_000);
+    let (compound_target, mut p) = flaky_params(&s);
+    p.after = Some(harvest);
+    let compound = s.cron.create_job(&s.owner, &p, &1_000);
+
+    // The follower waits for its leader even though its own time has come.
+    assert!(!s.cron.is_due(&compound));
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &compound),
+        Err(Ok(Error::AwaitingDependency))
+    );
+
+    s.cron.execute(&s.keeper, &harvest);
+    assert!(s.cron.is_due(&compound));
+    s.cron.execute(&s.keeper, &compound);
+
+    // Next interval: the follower is due by time but the leader hasn't run.
+    advance(&s.env, INTERVAL);
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &compound),
+        Err(Ok(Error::AwaitingDependency))
+    );
+    s.cron.execute(&s.keeper, &harvest);
+    s.cron.execute(&s.keeper, &compound);
+
+    let target = FlakyTargetClient::new(&s.env, &compound_target);
+    assert_eq!(s.target.count(), 2);
+    assert_eq!(target.run(), 3); // two runs by keepers, plus this direct call
+    assert_eq!(s.cron.get_job(&compound).unwrap().after, Some(harvest));
+}
+
+#[test]
+fn following_a_job_starts_from_its_current_run_count() {
+    let s = setup();
+    let leader = s.cron.create_job(&s.owner, &params(&s), &1_000);
+    for _ in 0..3 {
+        s.cron.execute(&s.keeper, &leader);
+        advance(&s.env, INTERVAL);
+    }
+    let mut p = params(&s);
+    p.after = Some(leader);
+    let follower = s.cron.create_job(&s.owner, &p, &1_000);
+    assert_eq!(s.cron.get_job_state(&follower).unwrap().leader_runs, 3);
+    assert!(!s.cron.is_due(&follower));
+    s.cron.execute(&s.keeper, &leader);
+    assert!(s.cron.is_due(&follower));
+}
+
+#[test]
+fn dependency_must_exist_and_cancelling_the_leader_stops_the_follower() {
+    let s = setup();
+    let mut p = params(&s);
+    p.after = Some(42);
+    assert_eq!(
+        s.cron.try_create_job(&s.owner, &p, &1_000),
+        Err(Ok(Error::JobNotFound))
+    );
+
+    let leader = s.cron.create_job(&s.owner, &params(&s), &1_000);
+    p.after = Some(leader);
+    let follower = s.cron.create_job(&s.owner, &p, &1_000);
+    s.cron.execute(&s.keeper, &leader);
+    s.cron.cancel_job(&leader);
+    assert_eq!(
+        s.cron.try_execute(&s.keeper, &follower),
+        Err(Ok(Error::AwaitingDependency))
+    );
+
+    // The owner can drop the dependency, or point it at a job of their own.
+    let mut u = update_from(&s, follower);
+    u.after = Some(follower);
+    assert_eq!(
+        s.cron.try_update_job(&follower, &u),
+        Err(Ok(Error::AwaitingDependency))
+    );
+    u.after = None;
+    s.cron.update_job(&follower, &u);
+    s.cron.execute(&s.keeper, &follower);
 }

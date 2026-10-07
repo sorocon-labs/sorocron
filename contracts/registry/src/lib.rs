@@ -201,6 +201,10 @@ impl SoroCron {
         spec.end_at = update.end_at;
         spec.resolver = update.resolver;
         spec.keepers = update.keepers;
+        if update.after != spec.after {
+            state.leader_runs = leader_runs(&env, job_id, update.after)?;
+            spec.after = update.after;
+        }
         storage::set_spec(&env, job_id, &spec);
         storage::set_state(&env, job_id, &state);
 
@@ -684,6 +688,12 @@ impl SoroCron {
         storage::get_job(&env, job_id)
     }
 
+    /// Just a job's run state (next run, balance, runs, failures, active):
+    /// one small entry, so it is the cheap read for resolvers and keepers.
+    pub fn get_job_state(env: Env, job_id: u64) -> Option<JobState> {
+        storage::get_state(&env, job_id)
+    }
+
     pub fn get_keeper(env: Env, keeper: Address) -> Option<Keeper> {
         storage::get_keeper(&env, &keeper)
     }
@@ -766,6 +776,7 @@ impl SoroCron {
             Some((spec, state)) => {
                 ensure_due(&spec, &state, env.ledger().timestamp()).is_ok()
                     && !storage::is_target_halted(&env, &spec.target)
+                    && dependency_met(&env, &spec, &state).is_ok()
                     && resolver_allows(&env, job_id, &spec)
             }
             None => false,
@@ -805,7 +816,34 @@ fn validate_job(
     if is_forbidden_target(env, config, &params.target) {
         return Err(Error::ForbiddenTarget);
     }
+    if let Some(leader) = params.after {
+        storage::get_state(env, leader).ok_or(Error::JobNotFound)?;
+    }
     Ok(())
+}
+
+/// The leader's current run count, for a job that follows `after`. A job
+/// can't follow itself.
+fn leader_runs(env: &Env, job_id: u64, after: Option<u64>) -> Result<u32, Error> {
+    match after {
+        None => Ok(0),
+        Some(leader) if leader == job_id => Err(Error::AwaitingDependency),
+        Some(leader) => Ok(storage::get_state(env, leader)
+            .ok_or(Error::JobNotFound)?
+            .runs),
+    }
+}
+
+/// For jobs that follow another job: whether the leader has run again since
+/// this job last ran. Returns the leader's run count to record on success.
+fn dependency_met(env: &Env, spec: &JobSpec, state: &JobState) -> Result<u32, Error> {
+    match spec.after {
+        None => Ok(state.leader_runs),
+        Some(leader) => match storage::get_state(env, leader) {
+            Some(l) if l.runs > state.leader_runs => Ok(l.runs),
+            _ => Err(Error::AwaitingDependency),
+        },
+    }
 }
 
 /// Checks the settings shared by `create_job` and `update_job` and returns
@@ -872,7 +910,12 @@ fn insert_job(env: &Env, owner: &Address, params: JobParams, deposit: i128) -> u
         end_at: params.end_at,
         resolver: params.resolver,
         keepers: params.keepers,
+        after: params.after,
     };
+    let leader_runs = spec
+        .after
+        .and_then(|leader| storage::get_state(env, leader))
+        .map_or(0, |l| l.runs);
     storage::set_spec(env, id, &spec);
     storage::set_state(
         env,
@@ -883,6 +926,7 @@ fn insert_job(env: &Env, owner: &Address, params: JobParams, deposit: i128) -> u
             runs: 0,
             failures: 0,
             active: true,
+            leader_runs,
         },
     );
     storage::add_owner_job(env, owner, id);
@@ -965,6 +1009,7 @@ fn run_job(
     if assigned.is_some() && now < state.next_run.saturating_add(config.grace_period) {
         return Err(Error::NotAssignedKeeper);
     }
+    let leader_runs = dependency_met(env, &spec, &state)?;
     if !resolver_allows(env, job_id, &spec) {
         return Err(Error::ResolverRejected);
     }
@@ -985,6 +1030,7 @@ fn run_job(
     let lateness = now.saturating_sub(state.next_run);
 
     state.runs = state.runs.saturating_add(1);
+    state.leader_runs = leader_runs;
     state.balance -= fee;
     state.next_run = next_run_after(state.next_run, spec.interval, now);
     if success {

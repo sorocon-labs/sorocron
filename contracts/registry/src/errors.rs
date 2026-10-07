@@ -48,4 +48,7 @@ pub enum Error {
     InvalidSetting = 30,
     /// Keeper allowlist longer than `MAX_JOB_KEEPERS`.
     TooManyKeepers = 31,
+    /// The job follows another job (`after`) that hasn't run again yet, or
+    /// no longer exists.
+    AwaitingDependency = 32,
 }

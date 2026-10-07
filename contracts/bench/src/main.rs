@@ -73,6 +73,7 @@ fn params(env: &Env, target: &Address) -> registry::JobParams {
         end_at: 0,
         resolver: None,
         keepers: None,
+        after: None,
     }
 }
 
@@ -131,7 +132,8 @@ fn main() {
     // small state entry, so this costs about the same to execute.
     let mut big = params(&env, &target);
     for _ in 0..4 {
-        big.args.push_back(soroban_sdk::Bytes::from_array(&env, &[7u8; 256]).into_val(&env));
+        big.args
+            .push_back(soroban_sdk::Bytes::from_array(&env, &[7u8; 256]).into_val(&env));
     }
     let big_id = cron.create_job(&owner, &big, &(FEE * 100));
     measure(&env, "create_job (1 KB of args)", &mut rows);

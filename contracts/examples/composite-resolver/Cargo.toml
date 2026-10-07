@@ -1,6 +1,6 @@
 [package]
-name = "sorocron-example-subscription"
-description = "Example SoroCron job target: Recurring subscription pull payment contract"
+name = "sorocron-example-composite-resolver"
+description = "SoroCron example: Resolver that combines other resolvers with ALL (and) or ANY (or)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

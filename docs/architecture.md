@@ -40,8 +40,8 @@ sequenceDiagram
 | `Config` | instance | admin, tokens, min stake, unbonding period and epoch, paused flag, executor, min interval, max args, protocol fee and treasury, max failures, grace period, slash share |
 | `NextJobId` | instance | monotonically increasing job id counter |
 | `PendingAdmin` | instance | admin proposed via `propose_admin`, until accepted |
-| `Job(u64)` | persistent | `JobSpec`: owner, target, function, args, interval, schedule, fees, max_runs, end_at, resolver, keeper allowlist |
-| `JobState(u64)` | persistent | `JobState`: next_run, balance, runs, consecutive failures, active |
+| `Job(u64)` | persistent | `JobSpec`: owner, target, function, args, interval, schedule, fees, max_runs, end_at, resolver, keeper allowlist, leader job |
+| `JobState(u64)` | persistent | `JobState`: next_run, balance, runs, consecutive failures, active, leader's run count for chained jobs |
 | `Keeper(Address)` | persistent | stake, unbonding_at, executions, total lateness, missed windows, slashed stake |
 | `ActiveKeepers` | persistent | keepers in the assigned-window rotation, in staking order (max 64) |
 | `HaltedTarget(Address)` | persistent | present while the admin has halted a target contract |
@@ -95,6 +95,20 @@ The executor call is made with `try_execute`. If the target fails, the run still
 
 Every run emits one `JobExecuted` receipt with the outcome (`success`), the total fee and protocol share, the run number, the next run, how late it ran, the failure count and a hash of the return value (or error). CPU and memory use aren't observable from inside a contract; keepers read them from the transaction result.
 
+## Chaining jobs
+
+A job can follow another: with `after: Some(leader_id)` it is due only once
+the leader has run again since the follower last ran, so the follower runs
+exactly once per leader run (harvest, then compound). Following starts from
+the leader's run count when the link is made, so earlier leader runs don't
+count. If the leader is cancelled the follower waits (`AwaitingDependency`)
+until its owner removes or changes the dependency with `update_job`.
+
+This lives in the registry rather than in a resolver because Soroban forbids
+contract re-entry: when the registry asks a resolver `should_run`, the
+resolver cannot call back into the registry to read another job's state.
+The registry already holds both jobs, so the check costs one extra read.
+
 ## Circuit breakers
 
 - `set_paused(true)` stops all execution and deposits; exits keep working.
@@ -126,7 +140,17 @@ interval: 86400   (check daily)
 
 Each run extends the protected contract's **instance and code** TTL to `extend_to` whenever it has dropped below `threshold` (and does nothing otherwise). `extend_to` is capped at the network maximum. The job is paid for like any other, so the protocol never has to run its own bot.
 
-Limitation: a contract can only extend another contract's instance and code, not its persistent storage entries. Contracts that need persistent data kept alive should expose a permissionless `extend_ttl` function that bumps their own entries, and schedule that directly.
+Limitation: a contract can only extend another contract's instance and code, not its persistent storage entries. Contracts that need persistent data kept alive should expose a permissionless `extend_ttl` function that bumps their own entries, and schedule that directly; [`examples/self-extending`](../contracts/examples/self-extending) shows the pattern, with a test that the data lapses when the job is removed.
+
+Which to use:
+
+| Need | Schedule |
+|---|---|
+| Keep a contract's code and instance storage alive | The TTL Guardian's `extend` |
+| Keep a contract's persistent entries alive | The contract's own `extend_ttl` (you add it) |
+| Both | Both jobs, or have `extend_ttl` bump the instance too, as the example does |
+
+Since protocol 23, archived entries can be restored automatically, but the transaction that touches them pays the restore fee. Keeping them alive is cheaper and avoids surprising the next user with that fee.
 
 The test `guardian_job_keeps_target_contract_from_being_archived` runs this end to end through the registry, executor and a keeper.
 
@@ -165,3 +189,4 @@ The test `guardian_job_keeps_target_contract_from_being_archived` runs this end 
 | 29 | `InvalidCalendar` | Calendar hour, minute or weekday out of range, or a calendar with a non-zero interval |
 | 30 | `InvalidSetting` | Protocol fee or slash share above 10%, fee ceiling below the base fee, or a protocol fee without a treasury |
 | 31 | `TooManyKeepers` | Keeper allowlist longer than 10 |
+| 32 | `AwaitingDependency` | The job follows another job that hasn't run again since, or no longer exists |

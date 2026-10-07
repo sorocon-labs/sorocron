@@ -1891,6 +1891,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sorocron-example-composite-resolver"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-testkit",
+]
+
+[[package]]
 name = "sorocron-example-counter"
 version = "0.3.0"
 dependencies = [
@@ -1902,6 +1910,7 @@ name = "sorocron-example-dca"
 version = "0.3.0"
 dependencies = [
  "soroban-sdk",
+ "sorocron-testkit",
 ]
 
 [[package]]
@@ -1912,6 +1921,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sorocron-example-limit-order"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-testkit",
+]
+
+[[package]]
+name = "sorocron-example-nft-floor-trigger"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-testkit",
+]
+
+[[package]]
 name = "sorocron-example-oracle-trigger"
 version = "0.3.0"
 dependencies = [
@@ -1919,10 +1944,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "sorocron-example-price-resolver"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-testkit",
+]
+
+[[package]]
+name = "sorocron-example-rebalance-resolver"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-testkit",
+]
+
+[[package]]
+name = "sorocron-example-self-extending"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-testkit",
+]
+
+[[package]]
 name = "sorocron-example-subscription"
 version = "0.3.0"
 dependencies = [
  "soroban-sdk",
+ "sorocron-testkit",
+]
+
+[[package]]
+name = "sorocron-example-timelock"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-testkit",
+]
+
+[[package]]
+name = "sorocron-example-timelock-resolver"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-testkit",
 ]
 
 [[package]]
@@ -1930,6 +1996,7 @@ name = "sorocron-example-vesting"
 version = "0.3.0"
 dependencies = [
  "soroban-sdk",
+ "sorocron-testkit",
 ]
 
 [[package]]
@@ -1947,6 +2014,15 @@ dependencies = [
  "soroban-sdk",
  "sorocron-executor",
  "sorocron-ttl-guardian",
+]
+
+[[package]]
+name = "sorocron-testkit"
+version = "0.3.0"
+dependencies = [
+ "soroban-sdk",
+ "sorocron-executor",
+ "sorocron-registry",
 ]
 
 [[package]]
