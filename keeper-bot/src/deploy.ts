@@ -40,7 +40,8 @@ import {
 } from "./config.js";
 
 const MIN_STAKE = XLM(1);
-const UNBONDING_PERIOD_SECONDS = 3_600n;
+// The end-to-end CI job shortens this so it can test withdrawing stake.
+const UNBONDING_PERIOD_SECONDS = BigInt(process.env.UNBONDING_PERIOD_SECONDS || 3_600);
 
 async function uploadWasm(keypair: Keypair, file: string): Promise<string> {
   const path = resolve(WASM_DIR, file);

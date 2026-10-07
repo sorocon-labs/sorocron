@@ -7,7 +7,8 @@ name: Release
 # testnet from time to time, and redeploy if it's gone.
 #
 # Redeploying opens a pull request updating deployments/testnet.json, the
-# source of truth for testnet addresses. Setup: add a funded testnet secret
+# source of truth for testnet addresses, and the README, docs and SDK that
+# quote them (scripts/sync-deployment.mjs). Setup: add a funded testnet secret
 # key as the TESTNET_SECRET_KEY repository secret, and allow Actions to open
 # pull requests (Settings -> Actions -> General -> Workflow permissions).
 on:
@@ -147,20 +148,29 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - name: Deploy
-        run: npm run deploy -w sorocron-keeper-bot
+        run: |
+          cp deployments/testnet.json "$RUNNER_TEMP/previous-testnet.json"
+          npm run deploy -w sorocron-keeper-bot
+          # Point the README, docs and SDK at the new contracts.
+          node scripts/sync-deployment.mjs "$RUNNER_TEMP/previous-testnet.json"
       - name: Smoke test the new deployment
         # Stakes, creates two jobs and runs both; fails unless both ran.
         run: npm run demo -w sorocron-keeper-bot
       - name: Open a pull request with the new addresses
         uses: peter-evans/create-pull-request@v7
         with:
-          add-paths: deployments/testnet.json
+          add-paths: |
+            deployments/testnet.json
+            packages/sdk/src
+            *.md
           branch: deploy/testnet-${{ github.run_id }}
           commit-message: "chore(deployments): redeploy testnet (${{ github.ref_name }})"
           title: "chore(deployments): redeploy testnet (${{ github.ref_name }})"
           body: |
             The release workflow redeployed SoroCron to testnet (trigger: `${{ github.event_name }}` on `${{ github.ref_name }}`) and the demo ran both jobs against it.
 
-            Merging updates `deployments/testnet.json`, which the SDK, CLI, keepers and app read testnet addresses from.
+            Merging updates `deployments/testnet.json`, which the CLI and keepers read testnet addresses from, and the addresses quoted in the SDK, README and docs.
 
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Closes #31, closes #53, closes #76

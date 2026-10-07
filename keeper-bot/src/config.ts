@@ -199,4 +199,6 @@ export const settings = {
   alertWebhookUrl: process.env.ALERT_WEBHOOK_URL ?? "",
   alertFormat: (process.env.ALERT_FORMAT ?? "generic") as "discord" | "slack" | "generic",
   alertCooldownMs: num("ALERT_COOLDOWN_MS", 3_600_000),
+  /** Stake to hold: the keeper stakes back up to this after slashing. 0 turns top-ups off. */
+  topUpStakeTo: XLM(num("TOPUP_STAKE_TO_XLM", 0)),
 };

@@ -155,10 +155,18 @@ npm run cli -- jobs cancel 7          # delete it and refund the balance
 npm run cli -- keeper status          # stake, eligibility, lateness, misses, slashing
 npm run cli -- keeper status GABC...  # any keeper
 npm run cli -- keeper stake 100       # become a keeper or add stake
+npm run cli -- keeper topup           # stake back up to the registry minimum
+npm run cli -- keeper topup --to 100 --max 20  # hold 100 XLM, adding at most 20 at a time
 npm run cli -- keeper unbond          # stop executing, start the unbonding timer
 npm run cli -- keeper withdraw        # once unbonding has finished
 npm run cli -- keeper settle GA... GB...  # pay out every listed keeper whose unbonding finished
 ```
+
+`keeper topup` stakes only what's missing and does nothing when the keeper
+already holds the target, so it's safe to run from cron. `--dry-run` shows
+what it would stake. To have the keeper node do it instead, set
+`TOPUP_STAKE_TO_XLM`: each tick it stakes back up to that amount if slashing
+took stake away.
 
 ### Registry
 

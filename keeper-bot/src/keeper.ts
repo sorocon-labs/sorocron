@@ -11,6 +11,9 @@
  *
  * Observability: METRICS_PORT serves Prometheus metrics on /metrics and a
  * liveness probe on /healthz; LOG_FORMAT=json gives structured logs.
+ *
+ * TOPUP_STAKE_TO_XLM makes it stake back up to that amount whenever slashing
+ * takes stake away.
  */
 import type { Keypair } from "@stellar/stellar-sdk";
 import type { SoroCron } from "@sorocron/sdk";
@@ -35,6 +38,7 @@ import { JobIndex } from "./jobIndex.js";
 import { createLogger } from "./logger.js";
 import { Metrics, startMetricsServer, type HealthState } from "./metrics.js";
 import { withRetry } from "./retry.js";
+import { planTopUp } from "./topup.js";
 import { tick, type BatchClient, type TickSummary } from "./tick.js";
 
 const once = process.argv.includes("--once");
@@ -64,6 +68,7 @@ async function main() {
     throw new Error(describeMissingContractError(err, contractId) ?? String(err));
   }
 
+  await topUpStake(cron, keeper);
   const stats = await cron.keeperStats(keeper);
   if (!stats) throw new Error(`${keeper} is not a registered keeper. Stake first: npm run cli -- keeper stake <amount>`);
   if (!stats.eligible) throw new Error(`${keeper} can't execute (unbonding, or stake below the minimum).`);
@@ -117,6 +122,7 @@ async function main() {
   do {
     try {
       await checkAccounts(keeper, channelKeys, metrics, alerts);
+      await topUpStake(cron, keeper);
       await checkStake(cron, keeper, config.min_stake, alerts);
       await fees.refresh();
       metrics.set("sorocron_keeper_inclusion_fee_stroops", "Current inclusion fee bid", fees.current());
@@ -193,6 +199,21 @@ async function checkAccounts(keeper: string, channels: Keypair[], metrics: Metri
     } catch (err) {
       logger.warn(`could not check ${address}'s balance: ${err instanceof Error ? err.message : err}`);
     }
+  }
+}
+
+/** Stakes back up to TOPUP_STAKE_TO_XLM when slashing takes stake away (#76). */
+async function topUpStake(cron: SoroCron, keeper: string) {
+  if (!settings.topUpStakeTo) return;
+  try {
+    // While unbonding the plan is "blocked"; checkStake alerts about that.
+    const plan = planTopUp(await cron.getKeeper(keeper), settings.topUpStakeTo);
+    if (plan.action !== "stake") return;
+    const { result } = await cron.stake(plan.amount);
+    log(`topped up stake by ${formatXlm(plan.amount)} XLM to ${formatXlm(result)} XLM`);
+  } catch (err) {
+    // Don't stop executing: checkStake still alerts if the keeper is short.
+    logger.warn(`stake top-up failed: ${err instanceof Error ? err.message : err}`);
   }
 }
 

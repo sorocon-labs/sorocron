@@ -38,6 +38,7 @@ documents each one. The important ones:
 | `METRICS_PORT` | Prometheus `/metrics` and `/healthz` |
 | `LOG_FORMAT=json` | Structured logs for your log pipeline |
 | `ALERT_WEBHOOK_URL`, `ALERT_FORMAT` | Discord, Slack or JSON alerts |
+| `TOPUP_STAKE_TO_XLM` | Stake back up to this amount after slashing |
 
 ## Key handling
 

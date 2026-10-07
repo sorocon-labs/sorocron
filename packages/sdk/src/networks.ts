@@ -20,6 +20,7 @@ export interface NetworkConfig {
   };
 }
 
+/** Mirrors deployments/testnet.json; scripts/sync-deployment.mjs updates it on redeploy. */
 export const TESTNET: NetworkConfig = {
   name: "testnet",
   rpcUrl: "https://soroban-testnet.stellar.org",
