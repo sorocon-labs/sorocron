@@ -44,8 +44,8 @@ jobs:
           cp -r book/build app/dist/docs
         env:
           MDBOOK_OUTPUT__HTML__SITE_URL: /${{ github.event.repository.name }}/docs/
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: app/dist
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
