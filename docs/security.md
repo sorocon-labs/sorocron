@@ -37,18 +37,51 @@ Consequences for integrators:
 
 | Property | How |
 |---|---|
-| No re-entrancy | Soroban forbids contract re-entrancy. The registry also updates state before external calls. |
-| Users can always exit | `cancel_job`, `begin_unbonding` and `withdraw_stake` work while the registry is paused. |
+| No re-entrancy | Soroban forbids contract re-entrancy. The target can't call back into the registry while a run is in progress. |
+| Users can always exit | `cancel_job`, `withdraw_job_balance`, `begin_unbonding`, `withdraw_stake` and `withdraw_stakes` work while the registry is paused or a target is halted. |
 | Bad resolvers can't break keepers | Resolvers are called with `try_invoke_contract`; failures count as "not ready". |
-| Failed targets cost nothing | If the target panics, the whole `execute` reverts: no fee moves, the schedule doesn't advance. Keepers see this in simulation and skip the job. |
+| Broken targets stop costing keepers | Failed runs are charged and recorded, and a job pauses itself after `max_failures` consecutive failures. |
+| Compromised targets can be cut off | `set_target_halted` stops every job calling a contract without pausing the registry. |
 | No state archival of live data | TTLs are extended on every read/write. |
-| Fee accounting | The contract's fee-token balance equals the sum of job balances plus keeper stakes (when fee and stake token are the same). Property tests for this invariant are on the roadmap. |
+| Fee accounting | See the invariant below. |
+
+## Fee accounting invariant
+
+When the fee and stake token are the same:
+
+```text
+registry token balance == sum(live job balances) + sum(registered keepers' stakes)
+```
+
+Every token that enters (deposits, funding, stake) is credited to exactly one job or keeper, and every token that leaves (keeper fees, protocol fees, refunds, withdrawals, slashing rewards) is debited from exactly one of them. `contracts/registry/src/invariants.rs` checks this after every step of random operation sequences: creates, funding, withdrawals, cancellations, single and batched executions (with failing targets and fee ramps), staking, unbonding, epoch settlement and clock jumps, with protocol fees, assigned windows and slashing enabled. CI runs 1,000 generated cases on every pull request. The same test fails if any call errors outside the registry's own error codes.
+
+## Failure charging
+
+A run whose target fails is still charged, because the keeper did the work and paid the network fee for it, and refusing to pay would leave a broken job due forever, wasting every keeper's simulations. Could a keeper fake a failure to collect fees for free? Soroban makes the two levers unavailable:
+
+- **Starving the call of budget:** running out of CPU or memory budget is not recoverable by `try_call`. The whole transaction fails, including the keeper's fee.
+- **Omitting storage from the footprint:** accessing an entry outside the transaction footprint is also non-recoverable.
+
+Both are classified non-recoverable in `soroban-env-host` (`HostError::is_recoverable`). What remains is a target that genuinely fails in the current state, which is the owner's to fix. After `max_failures` consecutive failures the job pauses, which bounds what a broken job can spend.
+
+## Upgrades and migrations
+
+The admin can replace the registry's code with `upgrade(wasm_hash)`; storage and the contract address are kept, and an `Upgraded` event records the new hash and the previous `version()`. The test `upgrade_to_real_wasm_preserves_state` uploads the built WASM, upgrades to it and checks that jobs, keepers and config survive and keep working.
+
+Policy:
+
+- **The admin key must be a multisig or sit behind a timelock in production.** Upgrade authority over a contract that holds deposits is the most powerful role in the system.
+- Every interface change bumps `version()`. Clients check it before relying on new functions.
+- Storage layout changes need a migration plan in the upgrade's pull request: either new keys alongside old ones, or a one-off migration function that is removed in the following release. v4 changed the job layout, so v3 deployments are redeployed rather than upgraded.
+- Error codes and event fields are only ever appended.
 
 ## Known limitations
 
-- **Keeper racing:** execution is first-come-first-served. Rotation and slashing are planned.
-- **Admin trust:** the admin can pause the registry, change `min_stake`, and connect the executor once. The admin cannot move user funds or swap the executor. Handover uses a two-step `propose_admin` / `accept_admin` flow, so control can't be sent to an address nobody controls.
-- **Failing jobs:** a job whose target always panics stays "due" forever and wastes keeper simulations. Planned: failure tracking and auto-deactivation.
+- **Admin trust:** the admin can pause the registry, halt targets, change `min_stake`, set the protocol fee and slash share (each capped at 10%), connect the executor once and upgrade the code. The admin cannot move escrowed funds except through an upgrade, which is why the admin should be a multisig. Handover uses a two-step `propose_admin` / `accept_admin` flow.
+- **Rotation size:** at most 64 keepers take part in assigned windows; others can still run any job after its window.
+- **Lateness metrics** are averages over a keeper's lifetime, not a sliding window.
+
+See the [threat model](threat-model.md) for a structured list of threats and open risks.
 
 ## Reporting a vulnerability
 

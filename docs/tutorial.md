@@ -26,8 +26,11 @@ From the repository root:
 
 ```bash
 rustup target add wasm32v1-none
-cargo build --release --target wasm32v1-none
+stellar contract build
 ```
+
+`stellar contract build` needs the [Stellar CLI](https://developers.stellar.org/docs/tools/cli)
+v25.2 or newer; soroban-sdk 28 refuses to build contract WASM any other way.
 
 This builds the registry, executor, TTL Guardian, counter, and resolver WASM
 files under `target/wasm32v1-none/release/`.
@@ -107,8 +110,8 @@ npm run keeper -- --once
 ## Troubleshooting
 
 - `No deployment found`: run `npm run deploy:testnet` from `keeper-bot/`.
-- `...wasm not found`: return to the repository root and rerun the `cargo
-  build --release --target wasm32v1-none` command.
+- `...wasm not found`: return to the repository root and rerun
+  `stellar contract build`.
 - `not a registered keeper` or `below the minimum`: run `npm run demo` first;
   it stakes the account used by the keeper.
 - Testnet account errors: check network access and delete `keeper-bot/.env` to

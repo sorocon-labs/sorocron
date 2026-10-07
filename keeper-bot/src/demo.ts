@@ -1,110 +1,82 @@
 /**
- * End-to-end demo against the testnet deployment:
+ * End-to-end demo against a deployment (testnet by default):
  *   1. stake as a keeper
  *   2. schedule `counter.increment(1)` every 30 seconds and execute it once
  *   3. schedule a daily TTL Guardian job that keeps the counter contract from
  *      being archived, and execute it once
  *
- * Afterwards `npm run keeper` keeps executing both on schedule.
+ * Afterwards `npm run keeper` keeps executing both on schedule. With
+ * STELLAR_NETWORK=local this is the end-to-end check CI runs against a
+ * local network; it exits non-zero unless both jobs ran.
  */
-import { Address, nativeToScVal } from "@stellar/stellar-sdk";
-import {
-  EXPLORER,
-  XLM,
-  clientFor,
-  ensureFunded,
-  keypairFromEnv,
-  loadDeployment,
-  unwrap,
-} from "./config.js";
+import { arg, parseAmount, schedule, ttlGuardianArgs } from "@sorocron/sdk";
+import { EXPLORER, connect, ensureFunded, keypairFromEnv, loadDeployment } from "./config.js";
 
-const LEDGERS_PER_DAY = 17_280;
+const link = (hash: string) => (hash && EXPLORER ? `${EXPLORER}/tx/${hash}` : hash);
 
 async function main() {
   const deployment = loadDeployment();
   const keypair = keypairFromEnv();
   const me = keypair.publicKey();
   await ensureFunded(keypair);
-
-  const registry = await clientFor(deployment.registry, keypair);
-  const counter = await clientFor(deployment.counter, keypair);
-  const config = (await registry.config()).result;
+  const cron = await connect(keypair);
+  const config = await cron.config();
 
   // 1. Stake as a keeper (skipped if already staked enough).
-  const keeper = (await registry.get_keeper({ keeper: me })).result;
-  const currentStake: bigint = keeper?.stake ?? 0n;
-  if (currentStake < config.min_stake) {
-    const amount = config.min_stake - currentStake;
-    console.log(`Staking ${amount} stroops as keeper...`);
-    unwrap((await (await registry.stake({ keeper: me, amount })).signAndSend()).result);
+  const stake = (await cron.getKeeper(me))?.stake ?? 0n;
+  if (stake < config.min_stake) {
+    console.log(`Staking ${config.min_stake - stake} stroops as keeper...`);
+    await cron.stake(config.min_stake - stake);
   } else {
-    console.log(`Already staked ${currentStake} stroops.`);
+    console.log(`Already staked ${stake} stroops.`);
   }
 
-  // 2. Schedule counter.increment(1) every 30s, max 10 runs, 0.1 XLM per run.
+  const common = {
+    start_at: 0n,
+    max_fee_per_run: 0n,
+    end_at: 0n,
+    fee_per_run: parseAmount("0.1"),
+  };
+
+  // 2. counter.increment(1) every 30s, at most 10 runs.
   console.log("\nCreating job: counter.increment(1) every 30s...");
-  const createTx = await registry.create_job({
-    owner: me,
-    params: {
+  const counterJob = await cron.createJob(
+    {
+      ...common,
       target: deployment.counter,
       function: "increment",
-      args: [nativeToScVal(1, { type: "u32" })],
+      args: [arg.u32(1)],
       interval: 30n,
-      start_at: 0n,
-      fee_per_run: XLM(0.1),
+      schedule: schedule.interval(),
       max_runs: 10,
-      resolver: undefined,
     },
-    deposit: XLM(1),
-  });
-  const jobId = unwrap<bigint>((await createTx.signAndSend()).result);
-  console.log(`  job id: ${jobId}`);
+    parseAmount("1"),
+  );
+  console.log(`  job ${counterJob.result}: ${link(counterJob.hash)}`);
+  const ran1 = await cron.execute(counterJob.result);
+  console.log(`  executed: ${link(ran1.hash)}`);
 
-  const before: number = (await counter.count()).result;
-  console.log("Executing job as keeper...");
-  const sent = await (await registry.execute({ keeper: me, job_id: jobId })).signAndSend();
-  unwrap(sent.result);
-  const after: number = (await counter.count()).result;
-
-  const job = (await registry.get_job({ job_id: jobId })).result;
-  console.log(`  counter: ${before} -> ${after}`);
-  console.log(`  job runs: ${job.runs}, remaining balance: ${job.balance} stroops`);
-  console.log(`  next run at: ${new Date(Number(job.next_run) * 1000).toISOString()}`);
-  const hash = sent.sendTransactionResponse?.hash;
-  if (hash) console.log(`  tx: ${EXPLORER}/tx/${hash}`);
-
-  // 3. Keep the counter contract alive: extend its TTL daily when it drops
-  //    below 60 days, back up to 90 days.
-  console.log("\nCreating TTL Guardian job protecting the counter contract...");
-  const guardTx = await registry.create_job({
-    owner: me,
-    params: {
+  // 3. Keep the counter contract alive: extend its TTL daily.
+  console.log("\nCreating job: TTL Guardian protects the counter daily...");
+  const guardJob = await cron.createJob(
+    {
+      ...common,
       target: deployment.ttlGuardian,
       function: "extend",
-      args: [
-        new Address(deployment.counter).toScVal(),
-        nativeToScVal(60 * LEDGERS_PER_DAY, { type: "u32" }),
-        nativeToScVal(90 * LEDGERS_PER_DAY, { type: "u32" }),
-      ],
+      args: ttlGuardianArgs(deployment.counter, 60, 90),
       interval: 86_400n,
-      start_at: 0n,
-      fee_per_run: XLM(0.1),
+      schedule: schedule.interval(),
       max_runs: 0,
-      resolver: undefined,
     },
-    deposit: XLM(1),
-  });
-  const guardId = unwrap<bigint>((await guardTx.signAndSend()).result);
-  console.log(`  job id: ${guardId}`);
+    parseAmount("1"),
+  );
+  console.log(`  job ${guardJob.result}: ${link(guardJob.hash)}`);
+  const ran2 = await cron.execute(guardJob.result);
+  console.log(`  executed: ${link(ran2.hash)}`);
 
-  console.log("Executing guardian job as keeper...");
-  const guardSent = await (await registry.execute({ keeper: me, job_id: guardId })).signAndSend();
-  unwrap(guardSent.result);
-  const guardHash = guardSent.sendTransactionResponse?.hash;
-  if (guardHash) console.log(`  tx: ${EXPLORER}/tx/${guardHash}`);
-
-  console.log(`\nRegistry: ${EXPLORER}/contract/${deployment.registry}`);
-  console.log("Run `npm run keeper` to keep executing due jobs.");
+  const [a, b] = await Promise.all([cron.getJob(counterJob.result), cron.getJob(guardJob.result)]);
+  if (a?.runs !== 1 || b?.runs !== 1) throw new Error(`expected both jobs to have run once (got ${a?.runs}, ${b?.runs})`);
+  console.log("\nBoth jobs ran. Start a keeper with `npm run keeper` to keep them running.");
 }
 
 main().catch((err) => {

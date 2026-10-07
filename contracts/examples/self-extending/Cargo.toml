@@ -1,0 +1,19 @@
+[package]
+name = "sorocron-example-self-extending"
+description = "SoroCron example: Contract that keeps its own persistent storage alive through a scheduled extend_ttl job"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+sorocron-testkit = { path = "../../testkit" }

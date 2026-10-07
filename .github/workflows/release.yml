@@ -1,0 +1,166 @@
+name: Release
+
+# On a `v*` tag: attach the contract WASMs to a GitHub release, publish the
+# keeper image to ghcr.io, and redeploy testnet (issue #31).
+#
+# Every Monday: check the testnet registry still exists, since Stellar resets
+# testnet from time to time, and redeploy if it's gone.
+#
+# Redeploying opens a pull request updating deployments/testnet.json, the
+# source of truth for testnet addresses. Setup: add a funded testnet secret
+# key as the TESTNET_SECRET_KEY repository secret, and allow Actions to open
+# pull requests (Settings -> Actions -> General -> Workflow permissions).
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      redeploy:
+        description: Redeploy testnet even if the registry still exists
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  wasm:
+    name: Release WASM
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+      - uses: stellar/stellar-cli@v28.1.0
+      - run: stellar contract build
+      - name: Collect contracts and checksums
+        run: |
+          mkdir release
+          cp target/wasm32v1-none/release/sorocron_registry.wasm \
+             target/wasm32v1-none/release/sorocron_executor.wasm \
+             target/wasm32v1-none/release/sorocron_ttl_guardian.wasm release/
+          cd release && sha256sum *.wasm > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+
+  image:
+    name: Keeper image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/sorocron-keeper
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: keeper-bot/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  check:
+    name: Is the testnet registry live?
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      redeploy: ${{ steps.check.outputs.redeploy }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: stellar/stellar-cli@v28.1.0
+      - id: check
+        env:
+          FORCE: ${{ github.event_name == 'push' || inputs.redeploy == true }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            echo "Release or manual run: redeploying."
+            echo "redeploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          registry=$(jq -r .registry deployments/testnet.json)
+          # Three tries, so a flaky RPC doesn't trigger a redeploy.
+          for i in 1 2 3; do
+            if stellar contract info interface --contract-id "$registry" --network testnet > /dev/null; then
+              echo "Registry $registry is live."
+              echo "redeploy=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::warning::Registry $registry wasn't found on testnet; redeploying."
+          echo "redeploy=true" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy to testnet
+    needs: check
+    if: needs.check.outputs.redeploy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      STELLAR_NETWORK: testnet
+      STELLAR_SECRET_KEY: ${{ secrets.TESTNET_SECRET_KEY }}
+    steps:
+      - name: Require the deploy key
+        run: |
+          if [ -z "$STELLAR_SECRET_KEY" ]; then
+            echo "::error::Add a funded testnet key as the TESTNET_SECRET_KEY secret to deploy."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+      - uses: Swatinem/rust-cache@v2
+      - uses: stellar/stellar-cli@v28.1.0
+      - run: stellar contract build
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Deploy
+        run: npm run deploy -w sorocron-keeper-bot
+      - name: Smoke test the new deployment
+        # Stakes, creates two jobs and runs both; fails unless both ran.
+        run: npm run demo -w sorocron-keeper-bot
+      - name: Open a pull request with the new addresses
+        uses: peter-evans/create-pull-request@v7
+        with:
+          add-paths: deployments/testnet.json
+          branch: deploy/testnet-${{ github.run_id }}
+          commit-message: "chore(deployments): redeploy testnet (${{ github.ref_name }})"
+          title: "chore(deployments): redeploy testnet (${{ github.ref_name }})"
+          body: |
+            The release workflow redeployed SoroCron to testnet (trigger: `${{ github.event_name }}` on `${{ github.ref_name }}`) and the demo ran both jobs against it.
+
+            Merging updates `deployments/testnet.json`, which the SDK, CLI, keepers and app read testnet addresses from.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

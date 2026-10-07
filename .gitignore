@@ -3,9 +3,17 @@ target/
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
+# Local networks are reset on every start, so their addresses aren't shared.
+deployments/local.json
 # Stellar CLI configuration
 .stellar/
 # Soroban CLI configuration
 .soroban/
 # Log files
 *.log
+# Documentation site: chapters are assembled from docs/ by scripts/prepare-book.mjs
+book/src/
+book/build/
+.claude/

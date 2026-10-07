@@ -28,4 +28,27 @@ pub enum Error {
     JobExpired = 20,
     IntervalTooShort = 21,
     TooManyArgs = 22,
+    /// Not returned since v4: failed target calls are recorded on the job
+    /// (`failures`, `JobExecuted.success`) instead of reverting.
+    TargetFailed = 23,
+    /// A batch was empty or longer than `MAX_BATCH`.
+    InvalidBatchSize = 24,
+    /// Parallel input vectors had different lengths.
+    LengthMismatch = 25,
+    /// The job has a keeper allowlist and the caller isn't on it.
+    KeeperNotAllowed = 26,
+    /// Within the grace period only the run's assigned keeper may execute.
+    NotAssignedKeeper = 27,
+    /// The admin halted every job calling this target.
+    TargetHalted = 28,
+    /// Calendar hour, minute or weekday out of range, or set together with an interval.
+    InvalidCalendar = 29,
+    /// A fee or slashing share above its maximum, a fee ceiling below the
+    /// base fee, or a protocol fee without a treasury.
+    InvalidSetting = 30,
+    /// Keeper allowlist longer than `MAX_JOB_KEEPERS`.
+    TooManyKeepers = 31,
+    /// The job follows another job (`after`) that hasn't run again yet, or
+    /// no longer exists.
+    AwaitingDependency = 32,
 }

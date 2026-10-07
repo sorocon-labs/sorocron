@@ -1,0 +1,19 @@
+[package]
+name = "sorocron-example-price-resolver"
+description = "SoroCron example: Resolver that lets a job run only when a Reflector oracle price crosses a threshold"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+sorocron-testkit = { path = "../../testkit" }

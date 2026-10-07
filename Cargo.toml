@@ -1,5 +1,7 @@
 [workspace]
 resolver = "2"
+# The Rust keeper is its own workspace (see keeper-rs/Cargo.toml).
+exclude = ["keeper-rs"]
 members = [
     "contracts/registry",
     "contracts/executor",
@@ -10,10 +12,42 @@ members = [
     "contracts/examples/vesting",
     "contracts/examples/subscription",
     "contracts/examples/oracle-trigger",
+    "contracts/examples/price-resolver",
+    "contracts/examples/self-extending",
+    "contracts/examples/timelock",
+    "contracts/examples/timelock-resolver",
+    "contracts/examples/composite-resolver",
+    "contracts/examples/rebalance-resolver",
+    "contracts/examples/nft-floor-trigger",
+    "contracts/examples/limit-order",
+    "contracts/testkit",
+    "contracts/bench",
+]
+# The benchmark loads the built WASM, so plain `cargo test` / `cargo build`
+# skip it. Run it with `cargo run -p sorocron-bench` after `stellar contract build`.
+default-members = [
+    "contracts/registry",
+    "contracts/executor",
+    "contracts/ttl-guardian",
+    "contracts/examples/counter",
+    "contracts/examples/flag-resolver",
+    "contracts/examples/dca",
+    "contracts/examples/vesting",
+    "contracts/examples/subscription",
+    "contracts/examples/oracle-trigger",
+    "contracts/examples/price-resolver",
+    "contracts/examples/self-extending",
+    "contracts/examples/timelock",
+    "contracts/examples/timelock-resolver",
+    "contracts/examples/composite-resolver",
+    "contracts/examples/rebalance-resolver",
+    "contracts/examples/nft-floor-trigger",
+    "contracts/examples/limit-order",
+    "contracts/testkit",
 ]
 
 [workspace.package]
-version = "0.1.0"  # workspace version
+version = "0.3.0"  # workspace version
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/sorocon-labs/sorocron"

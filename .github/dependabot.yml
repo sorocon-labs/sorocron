@@ -8,8 +8,9 @@ updates:
       soroban:
         patterns: ["soroban-*"]
 
+  # One lockfile for the SDK, React hooks, keeper and app (npm workspaces).
   - package-ecosystem: npm
-    directory: /keeper-bot
+    directory: /
     schedule:
       interval: weekly
     groups:

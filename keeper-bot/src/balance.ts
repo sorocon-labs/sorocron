@@ -5,7 +5,7 @@
  * an operator a chance to top up before that happens.
  */
 import { XLM } from "./config.js";
-import type { Logger } from "./tick.js";
+import type { Logger } from "./logger.js";
 
 export function isBalanceLow(balanceStroops: bigint, minXlm: number): boolean {
   return balanceStroops < XLM(minXlm);

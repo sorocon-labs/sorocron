@@ -55,6 +55,8 @@ Find the area that matches your contribution. Keep changes scoped to their desig
 ```bash
 # Rust + WebAssembly target for Soroban
 rustup target add wasm32v1-none
+# Stellar CLI v25.2+ builds the contract WASM (soroban-sdk 28 requires it)
+cargo install --locked stellar-cli
 rustup component add rustfmt clippy
 
 # Install Node.js (v20+ recommended)
@@ -67,7 +69,7 @@ The commands below are also available as [`just`](https://just.systems)
 recipes (`brew install just`, or see their install docs for Linux/Windows):
 
 ```bash
-just build           # cargo build --release --target wasm32v1-none
+just build           # stellar contract build
 just test            # cargo test
 just lint            # cargo fmt --all --check && cargo clippy --all-targets -- -D warnings
 just deploy-testnet  # keeper-bot's deploy:testnet script
@@ -82,7 +84,7 @@ just keeper          # run the keeper bot
 cargo test
 
 # Build release WASM contracts
-cargo build --release --target wasm32v1-none
+stellar contract build
 
 # Verify formatting and Clippy lints
 cargo fmt --all --check

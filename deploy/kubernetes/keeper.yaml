@@ -1,0 +1,82 @@
+# SoroCron keeper on Kubernetes. Create the secret first:
+#
+#   kubectl create secret generic sorocron-keeper \
+#     --from-literal=STELLAR_SECRET_KEY=S... \
+#     --from-literal=CHANNEL_SECRET_KEYS=S...,S... \
+#     --from-literal=ALERT_WEBHOOK_URL=https://...
+#   kubectl apply -f keeper.yaml
+#
+# One replica: two keepers sharing a key would race each other's sequence
+# numbers. Run more keepers with different keys instead.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sorocron-keeper
+data:
+  STELLAR_NETWORK: testnet
+  STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+  POLL_INTERVAL_MS: "10000"
+  BATCH_SIZE: "10"
+  FEE_PERCENTILE: p70
+  MAX_INCLUSION_FEE: "100000"
+  MIN_BALANCE_XLM: "5"
+  METRICS_PORT: "9464"
+  LOG_FORMAT: json
+  ALERT_FORMAT: generic
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sorocron-keeper
+  labels: { app: sorocron-keeper }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: sorocron-keeper }
+  template:
+    metadata:
+      labels: { app: sorocron-keeper }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: keeper
+          image: ghcr.io/sorocon-labs/sorocron-keeper:latest
+          envFrom:
+            - configMapRef: { name: sorocron-keeper }
+            - secretRef: { name: sorocron-keeper }
+          ports:
+            - { name: metrics, containerPort: 9464 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 384Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sorocron-keeper
+  labels: { app: sorocron-keeper }
+spec:
+  selector: { app: sorocron-keeper }
+  ports:
+    - { name: metrics, port: 9464, targetPort: metrics }

@@ -6,3 +6,5 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    ports:
+      - "9464:9464"   # /metrics for Prometheus, /healthz for liveness probes

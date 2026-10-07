@@ -1,0 +1,5 @@
+# Shell scripts and generated contract snapshots keep LF endings on every
+# platform, so the scripts run and snapshot diffs stay clean on Windows.
+*.sh                     text eol=lf
+contracts/interfaces/*   text eol=lf
+contracts/wasm-sizes.txt text eol=lf

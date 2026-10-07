@@ -1,0 +1,9 @@
+apiVersion: v2
+name: sorocron-keeper
+description: SoroCron keeper node, executing due Soroban automation jobs for fees
+type: application
+version: 0.3.0
+appVersion: "0.3.0"
+home: https://github.com/sorocon-labs/sorocron
+sources:
+  - https://github.com/sorocon-labs/sorocron

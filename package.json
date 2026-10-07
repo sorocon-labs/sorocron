@@ -1,0 +1,19 @@
+{
+  "name": "sorocron-workspace",
+  "private": true,
+  "description": "npm workspace for the SoroCron TypeScript packages: SDK, React hooks, keeper node and web app.",
+  "workspaces": [
+    "packages/sdk",
+    "packages/react",
+    "keeper-bot",
+    "app"
+  ],
+  "scripts": {
+    "build": "npm run build -w @sorocron/sdk && npm run build -w @sorocron/react && npm run build -w sorocron-keeper-bot && npm run build -w sorocron-app",
+    "test": "npm test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev": "npm run dev -w sorocron-app",
+    "keeper": "npm run keeper -w sorocron-keeper-bot",
+    "cli": "npm run cli -w sorocron-keeper-bot --"
+  }
+}
