@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Asset, Keypair, Networks, contract, rpc } from "@stellar/stellar-sdk";
 import { SoroCron, type NetworkConfig } from "@sorocron/sdk";
+import { rpcUrlsFrom } from "./endpoints.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -43,14 +44,24 @@ export const NETWORK = (process.env.STELLAR_NETWORK ?? "testnet") as NetworkName
 if (!(NETWORK in NETWORKS)) {
   throw new Error(`STELLAR_NETWORK must be testnet, mainnet or local (got ${NETWORK})`);
 }
-export const RPC_URL = process.env.STELLAR_RPC_URL || NETWORKS[NETWORK].rpcUrl;
-if (!RPC_URL) throw new Error("Set STELLAR_RPC_URL for mainnet.");
+/**
+ * RPC endpoints, most preferred first: STELLAR_RPC_URLS (comma-separated)
+ * when set, otherwise STELLAR_RPC_URL or the network default. The keeper
+ * fails over between them; scripts use the first.
+ */
+export const RPC_URLS = rpcUrlsFrom(process.env.STELLAR_RPC_URLS, process.env.STELLAR_RPC_URL || NETWORKS[NETWORK].rpcUrl);
+export const RPC_URL = RPC_URLS[0] ?? "";
+if (!RPC_URL) throw new Error("Set STELLAR_RPC_URL (or STELLAR_RPC_URLS) for mainnet.");
 export const NETWORK_PASSPHRASE = NETWORKS[NETWORK].passphrase;
 export const EXPLORER = NETWORKS[NETWORK].explorer;
 export const FRIENDBOT_URL = process.env.FRIENDBOT_URL || NETWORKS[NETWORK].friendbot;
 export const DEPLOYMENTS_FILE = resolve(REPO_ROOT, "deployments", `${NETWORK}.json`);
 
-export const server = new rpc.Server(RPC_URL, { allowHttp: RPC_URL.startsWith("http://") });
+export function rpcServer(url: string): rpc.Server {
+  return new rpc.Server(url, { allowHttp: url.startsWith("http://") });
+}
+
+export const server = rpcServer(RPC_URL);
 
 /** The native XLM SEP-41 wrapper contract id on this network. */
 export const NATIVE_TOKEN_CONTRACT_ID = Asset.native().contractId(NETWORK_PASSPHRASE);
@@ -84,12 +95,12 @@ export function registryId(): string {
   return process.env.SOROCRON_CONTRACT_ID || loadDeployment().registry;
 }
 
-/** The SDK's view of this network and deployment. */
-export function networkConfig(): NetworkConfig {
+/** The SDK's view of this network and deployment, through `rpcUrl`. */
+export function networkConfig(rpcUrl = RPC_URL): NetworkConfig {
   const d = existsSync(DEPLOYMENTS_FILE) ? loadDeployment() : undefined;
   return {
     name: NETWORK,
-    rpcUrl: RPC_URL,
+    rpcUrl,
     networkPassphrase: NETWORK_PASSPHRASE,
     explorer: EXPLORER,
     contracts: {
@@ -129,9 +140,9 @@ export function channelKeypairsFromEnv(): Keypair[] {
  * An SDK client sending from `source` (default: the keeper itself). When the
  * source is a channel account, the keeper still signs its own auth entry.
  */
-export function connect(keeper: Keypair, source: Keypair = keeper): Promise<SoroCron> {
+export function connect(keeper: Keypair, source: Keypair = keeper, rpcUrl = RPC_URL): Promise<SoroCron> {
   return SoroCron.connect({
-    network: networkConfig(),
+    network: networkConfig(rpcUrl),
     publicKey: source.publicKey(),
     signTransaction: contract.basicNodeSigner(source, NETWORK_PASSPHRASE).signTransaction,
     signAuthEntry: contract.basicNodeSigner(keeper, NETWORK_PASSPHRASE).signAuthEntry,

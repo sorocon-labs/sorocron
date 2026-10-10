@@ -13,9 +13,9 @@
  * liveness probe on /healthz; LOG_FORMAT=json gives structured logs.
  *
  * TOPUP_STAKE_TO_XLM makes it stake back up to that amount whenever slashing
- * takes stake away.
+ * takes stake away. With several STELLAR_RPC_URLS it fails over between them.
  */
-import type { Keypair } from "@stellar/stellar-sdk";
+import type { Keypair, rpc } from "@stellar/stellar-sdk";
 import type { SoroCron } from "@sorocron/sdk";
 import { Alerter } from "./alerts.js";
 import { formatXlm, isBalanceLow } from "./balance.js";
@@ -24,15 +24,17 @@ import {
   EXPLORER,
   NATIVE_TOKEN_CONTRACT_ID,
   NETWORK,
+  RPC_URLS,
   channelKeypairsFromEnv,
   connect,
   ensureFunded,
   keypairFromEnv,
   registryId,
-  server,
+  rpcServer,
   settings,
 } from "./config.js";
 import { describeMissingContractError } from "./contractErrors.js";
+import { Endpoints, endpointLabel } from "./endpoints.js";
 import { FeeStrategy } from "./fees.js";
 import { JobIndex } from "./jobIndex.js";
 import { createLogger } from "./logger.js";
@@ -48,6 +50,9 @@ const log = logger.info;
 /** Consecutive failed ticks before the RPC is reported down. */
 const RPC_DOWN_AFTER = 3;
 
+/** How long an endpoint probe may take before the endpoint counts as down. */
+const PROBE_TIMEOUT_MS = 5_000;
+
 async function main() {
   const keeperKeys = keypairFromEnv();
   const keeper = keeperKeys.publicKey();
@@ -56,14 +61,31 @@ async function main() {
   for (const k of channelKeys) await ensureFunded(k);
 
   const contractId = registryId();
+  const endpoints = new Endpoints(RPC_URLS);
+  const servers = new Map(endpoints.all.map((e) => [e.url, rpcServer(e.url)]));
+  const failover = servers.size > 1;
+  if (failover) {
+    await probeEndpoints(endpoints, servers);
+    endpoints.choose();
+  }
+
+  /** SDK clients for the keeper and each channel account, through `url`. */
+  const connectAll = async (url: string) => {
+    const keeperClient = await connect(keeperKeys, keeperKeys, url);
+    const clients = channelKeys.length
+      ? await Promise.all(channelKeys.map((k) => connect(keeperKeys, k, url)))
+      : [keeperClient];
+    return { cron: keeperClient, channels: new ChannelPool<BatchClient>(clients) };
+  };
+
+  // The endpoint the clients below talk to. It trails `endpoints.active`
+  // when connecting to a newly chosen endpoint fails, until a retry works.
+  let connected = endpoints.active;
+  let server = servers.get(connected)!;
   let cron: SoroCron;
   let channels: ChannelPool<BatchClient>;
   try {
-    cron = await connect(keeperKeys);
-    const clients = channelKeys.length
-      ? await Promise.all(channelKeys.map((k) => connect(keeperKeys, k)))
-      : [cron];
-    channels = new ChannelPool<BatchClient>(clients);
+    ({ cron, channels } = await connectAll(connected));
   } catch (err) {
     throw new Error(describeMissingContractError(err, contractId) ?? String(err));
   }
@@ -88,7 +110,8 @@ async function main() {
     source: `keeper ${keeper.slice(0, 6)}… on ${NETWORK}`,
     log: logger.warn,
   });
-  const fees = new FeeStrategy(server, { percentile: settings.feePercentile, maxFee: settings.maxInclusionFee });
+  const feeOptions = { percentile: settings.feePercentile, maxFee: settings.maxInclusionFee };
+  let fees = new FeeStrategy(server, feeOptions);
   const index = new JobIndex(
     {
       // Reads retry with backoff on transient RPC errors.
@@ -105,6 +128,7 @@ async function main() {
 
   log(
     `Keeper ${keeper} watching registry ${contractId} with ${channels.size} channel(s)` +
+      (failover ? ` through ${endpointLabel(connected)} (${servers.size} RPC endpoints)` : "") +
       (metricsServer ? `, metrics on :${settings.metricsPort}` : "") +
       (alerts.enabled ? ", alerts on" : ""),
   );
@@ -121,7 +145,23 @@ async function main() {
   let failedSends = 0;
   do {
     try {
-      await checkAccounts(keeper, channelKeys, metrics, alerts);
+      if (failover) {
+        await probeEndpoints(endpoints, servers);
+        endpoints.choose();
+        recordEndpoints(metrics, endpoints, connected);
+        if (endpoints.active !== connected) {
+          const next = endpoints.active;
+          log(`switching RPC endpoint from ${endpointLabel(connected)} to ${endpointLabel(next)}`);
+          ({ cron, channels } = await connectAll(next));
+          connected = next;
+          server = servers.get(next)!;
+          fees = new FeeStrategy(server, feeOptions);
+          // Endpoints keep different windows of events, so start the index over.
+          await index.load();
+          recordEndpoints(metrics, endpoints, connected);
+        }
+      }
+      await checkAccounts(server, keeper, channelKeys, metrics, alerts);
       await topUpStake(cron, keeper);
       await checkStake(cron, keeper, config.min_stake, alerts);
       await fees.refresh();
@@ -144,6 +184,7 @@ async function main() {
       );
       health.lastSuccessMs = Date.now();
       recordTick(metrics, summary, health.lastSuccessMs - started, index);
+      endpoints.recordSuccess(connected);
       failedTicks = 0;
       alerts.clear("rpc_down");
 
@@ -158,14 +199,22 @@ async function main() {
       }
     } catch (err) {
       failedTicks += 1;
+      endpoints.recordFailure(connected);
       metrics.inc("sorocron_keeper_tick_errors_total", "Ticks that threw before finishing");
       logger.error(`tick failed: ${err instanceof Error ? err.message : err}`);
       if (failedTicks >= RPC_DOWN_AFTER) {
         await alerts.notify({
           kind: "rpc_down",
           severity: "critical",
-          message: `${failedTicks} ticks in a row failed`,
-          details: { rpc: server.serverURL.toString(), error: err instanceof Error ? err.message : String(err) },
+          message:
+            failover && !endpoints.anyHealthy()
+              ? `every RPC endpoint is failing (${failedTicks} ticks in a row)`
+              : `${failedTicks} ticks in a row failed`,
+          details: {
+            rpc: endpointLabel(connected),
+            endpoints: endpoints.all.map((e) => `${endpointLabel(e.url)}: ${e.up ? "up" : "down"}`).join(", "),
+            error: err instanceof Error ? err.message : String(err),
+          },
         });
       }
     }
@@ -174,8 +223,46 @@ async function main() {
   metricsServer?.close();
 }
 
+/** Asks every endpoint for its latest ledger, in parallel, each with a timeout. */
+async function probeEndpoints(endpoints: Endpoints, servers: Map<string, rpc.Server>) {
+  await Promise.all(
+    endpoints.all.map(async ({ url }) => {
+      const started = Date.now();
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("probe timed out")), PROBE_TIMEOUT_MS);
+        });
+        const { sequence } = await Promise.race([servers.get(url)!.getLatestLedger(), timeout]);
+        endpoints.recordProbe(url, sequence, Date.now() - started);
+      } catch {
+        endpoints.recordProbe(url, undefined);
+      } finally {
+        clearTimeout(timer);
+      }
+    }),
+  );
+}
+
+function recordEndpoints(metrics: Metrics, endpoints: Endpoints, connected: string) {
+  for (const e of endpoints.all) {
+    const labels = { endpoint: endpointLabel(e.url) };
+    metrics.set("sorocron_keeper_rpc_up", "Whether each RPC endpoint answered its last probe", e.up ? 1 : 0, labels);
+    metrics.set("sorocron_keeper_rpc_active", "1 for the RPC endpoint in use, 0 for the others", e.url === connected ? 1 : 0, labels);
+    if (e.ledger !== undefined) {
+      metrics.set("sorocron_keeper_rpc_latest_ledger", "Latest ledger each RPC endpoint reported", e.ledger, labels);
+    }
+  }
+}
+
 /** Warns when the keeper or a channel can't afford network fees much longer. */
-async function checkAccounts(keeper: string, channels: Keypair[], metrics: Metrics, alerts: Alerter) {
+async function checkAccounts(
+  server: rpc.Server,
+  keeper: string,
+  channels: Keypair[],
+  metrics: Metrics,
+  alerts: Alerter,
+) {
   for (const address of [keeper, ...channels.map((c) => c.publicKey())]) {
     try {
       const balance = BigInt((await server.getAccountEntry(address)).balance);
