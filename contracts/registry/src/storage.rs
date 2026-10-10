@@ -8,7 +8,7 @@
 
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::types::{Config, DataKey, Job, JobSpec, JobState, Keeper, PendingUpgrade};
+use crate::types::{Config, DataKey, Job, JobSpec, JobState, Keeper, KeeperRecent, PendingUpgrade};
 
 const DAY_IN_LEDGERS: u32 = 17_280;
 
@@ -222,6 +222,17 @@ pub fn remove_keeper(env: &Env, keeper: &Address) {
     env.storage()
         .persistent()
         .remove(&DataKey::Keeper(keeper.clone()));
+    env.storage()
+        .persistent()
+        .remove(&DataKey::KeeperRecent(keeper.clone()));
+}
+
+pub fn get_keeper_recent(env: &Env, keeper: &Address) -> KeeperRecent {
+    get_persistent(env, &DataKey::KeeperRecent(keeper.clone())).unwrap_or_default()
+}
+
+pub fn set_keeper_recent(env: &Env, keeper: &Address, recent: &KeeperRecent) {
+    set_persistent(env, &DataKey::KeeperRecent(keeper.clone()), recent);
 }
 
 /// Keepers taking part in assigned windows, in the order they staked.

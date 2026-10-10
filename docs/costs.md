@@ -18,7 +18,37 @@ the mainnet fee schedule snapshot built into `soroban-sdk` 28
 fees as an upper bound. Re-run it after changing the contracts and paste the
 table below.
 
-## v4 (current)
+## v5 (current)
+
+Registry interface v5, soroban-sdk 28.0.0.
+
+| Call | CPU instructions | Memory (bytes) | Entries read | Entries written | Bytes written | Est. fee (stroops) |
+|---|---:|---:|---:|---:|---:|---:|
+| `stake` | 1,015,197 | 1,305,348 | 10 | 5 | 984 | 5,667,433 |
+| `create_job` | 1,176,346 | 1,329,108 | 10 | 7 | 2,248 | 7,149,570 |
+| `fund_job` | 983,498 | 1,297,538 | 8 | 4 | 788 | 2,214,051 |
+| `is_due` (simulation) | 805,060 | 1,262,785 | 5 | 0 | 0 | 564 |
+| `execute` (first run) | 1,867,705 | 3,543,336 | 16 | 7 | 1,436 | 321,789,682 |
+| `execute` (steady state) | 1,881,978 | 3,533,987 | 16 | 7 | 1,436 | 2,228,263 |
+| `execute` (after 100 runs) | 2,006,840 | 3,575,603 | 16 | 7 | 1,436 | 2,228,350 |
+| `create_job` (1 KB of args) | 1,405,874 | 1,433,116 | 10 | 7 | 3,316 | 11,676,769 |
+| `execute` (1 KB of args) | 1,979,475 | 3,567,293 | 16 | 6 | 1,304 | 2,224,155 |
+| `execute_batch` (5 jobs) | 5,461,719 | 4,436,175 | 24 | 11 | 2,508 | 2,255,593 |
+| `cancel_job` | 1,340,029 | 1,395,592 | 11 | 7 | 732 | 2,226,032 |
+
+v5 keeps each keeper's recent lateness and misses in a small entry of its
+own (#122), so `execute` and `execute_batch` read and write one more entry
+than in v4: about 4,400 stroops (0.2%) more per transaction.
+
+**A run costs the same however long a keeper has been running.** The
+entries read and written and the bytes written are identical for the
+second run and the hundredth. The bench's CPU figure does creep up, by about
+100,000 instructions per 100 earlier runs, but it does so just as much with
+the reputation bookkeeping removed, and also for a job created later. That
+growth comes from state the test environment accumulates between calls, not
+from anything a run stores.
+
+## v4
 
 Registry interface v4, soroban-sdk 28.0.0.
 

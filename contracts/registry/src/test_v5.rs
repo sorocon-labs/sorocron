@@ -4,9 +4,9 @@
 extern crate std;
 
 use crate::test::*;
-use crate::{events, Error, PendingUpgrade};
+use crate::{events, smooth, Error, PendingUpgrade};
 use soroban_sdk::{
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
     vec, Address, BytesN, Event as _, IntoVal, Val, Vec,
 };
 
@@ -334,4 +334,94 @@ fn cancelling_a_job_clears_its_pending_owner() {
         s.cron.try_propose_job_owner(&id, &proposed),
         Err(Ok(Error::JobNotFound))
     );
+}
+
+// ---------------------------------------------------------------------------
+// #122 Recent keeper reputation
+// ---------------------------------------------------------------------------
+
+/// Runs the job `lateness` seconds after it becomes due.
+fn run_late(s: &Setup, keeper: &Address, id: u64, lateness: u64) {
+    let due = s.cron.get_job(&id).unwrap().next_run;
+    s.env.ledger().set_timestamp(due + lateness);
+    s.cron.execute(keeper, &id);
+}
+
+#[test]
+fn smoothing_settles_exactly_on_a_repeated_sample() {
+    let mut scaled = 0;
+    for _ in 0..100 {
+        scaled = smooth(scaled, 40);
+    }
+    assert_eq!(scaled / 8, 40);
+    // Each sample counts for 1/8: one 80 after settling at 40 moves it by 5.
+    assert_eq!(smooth(scaled, 80) / 8, 45);
+}
+
+#[test]
+fn recent_lateness_follows_the_last_runs() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &1_000);
+    let mut expected = 0;
+    for lateness in [100; 16].into_iter().chain([0; 16]) {
+        run_late(&s, &s.keeper, id, lateness);
+        expected = smooth(expected, lateness);
+    }
+
+    let stats = s.cron.keeper_stats(&s.keeper).unwrap();
+    // The lifetime average still remembers the slow half...
+    assert_eq!(stats.average_lateness, 50);
+    // ...while the recent figure has mostly caught up with the fast runs.
+    assert_eq!(stats.recent_lateness, expected / 8);
+    assert!(stats.recent_lateness <= 12, "{}", stats.recent_lateness);
+}
+
+#[test]
+fn recent_misses_rise_with_a_missed_window_and_fade_with_good_runs() {
+    let s = setup();
+    let second = Address::generate(&s.env);
+    s.sac.mint(&second, &INITIAL_BALANCE);
+    s.cron.stake(&second, &MIN_STAKE);
+    s.cron.set_keeper_windows(&30, &0);
+    let id = s.cron.create_job(&s.owner, &params(&s), &1_000);
+    let assigned = s.cron.assigned_keeper(&id).unwrap();
+    let other = if assigned == s.keeper {
+        second
+    } else {
+        s.keeper.clone()
+    };
+
+    // The assigned keeper lets its window pass, so another keeper runs it.
+    run_late(&s, &other, id, 30);
+    let missed = s.cron.keeper_stats(&assigned).unwrap();
+    assert_eq!(missed.missed, 1);
+    assert_eq!(missed.recent_miss_bps, 1_250);
+    assert_eq!(s.cron.keeper_stats(&other).unwrap().recent_miss_bps, 0);
+
+    // Eight good runs later most of it has faded; the lifetime count stays.
+    s.cron.set_keeper_windows(&0, &0);
+    let mut expected = smooth(0, 10_000);
+    for _ in 0..8 {
+        run_late(&s, &assigned, id, 0);
+        expected = smooth(expected, 0);
+    }
+    let stats = s.cron.keeper_stats(&assigned).unwrap();
+    assert_eq!(stats.recent_miss_bps as u64, expected / 8);
+    assert!(stats.recent_miss_bps < 500, "{}", stats.recent_miss_bps);
+    assert_eq!(stats.missed, 1);
+}
+
+#[test]
+fn a_keeper_that_leaves_and_returns_starts_with_a_clean_recent_record() {
+    let s = setup();
+    let id = s.cron.create_job(&s.owner, &params(&s), &1_000);
+    run_late(&s, &s.keeper, id, 100);
+    assert!(s.cron.keeper_stats(&s.keeper).unwrap().recent_lateness > 0);
+
+    let at = s.cron.begin_unbonding(&s.keeper);
+    s.env.ledger().set_timestamp(at);
+    s.cron.withdraw_stake(&s.keeper);
+    s.cron.stake(&s.keeper, &MIN_STAKE);
+    let stats = s.cron.keeper_stats(&s.keeper).unwrap();
+    assert_eq!((stats.recent_lateness, stats.recent_miss_bps), (0, 0));
 }

@@ -243,6 +243,8 @@ pub struct KeeperStats {
     pub eligible: bool,
     pub executions: u32,
     pub missed: u32,
+    pub recent_lateness: u64,
+    pub recent_miss_bps: u32,
     pub slashed: i128,
     pub stake: i128,
 }

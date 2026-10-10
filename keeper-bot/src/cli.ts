@@ -221,6 +221,13 @@ keeper
         ["Average lateness", formatDuration(stats.average_lateness)],
         ["Missed windows", stats.missed],
         ["Slashed", xlm(stats.slashed)],
+        // Recent figures need a v5 registry.
+        ...(stats.recent_lateness === undefined
+          ? []
+          : ([
+              ["Recent lateness", `${formatDuration(stats.recent_lateness)} (last ~8 runs)`],
+              ["Recent misses", `${(stats.recent_miss_bps ?? 0) / 100}% of recent runs`],
+            ] as [string, string][])),
       ]),
     );
   });

@@ -16,7 +16,7 @@ cp .env.example .env   # set STELLAR_SECRET_KEY
 npm run keeper`;
 
 export function Keeper() {
-  const { cron, config, keeper, jobs, loading } = useRegistry();
+  const { cron, config, keeper, keeperStats, jobs, loading } = useRegistry();
   const { account, promptConnect } = useWallet();
   const now = useNow();
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -120,6 +120,13 @@ export function Keeper() {
                     keeper.executions > 0 ? formatDuration((keeper.total_lateness ?? 0n) / BigInt(keeper.executions)) : "—",
                   ],
                   ["Missed windows", String(keeper.missed ?? 0)],
+                  // Recent figures need a v5 registry.
+                  ...(keeperStats?.recent_lateness !== undefined
+                    ? ([
+                        ["Recent lateness", formatDuration(keeperStats.recent_lateness)],
+                        ["Recent misses", `${(keeperStats.recent_miss_bps ?? 0) / 100}%`],
+                      ] as [string, string][])
+                    : []),
                   ["Slashed", `${formatAmount(keeper.slashed ?? 0n)} XLM`],
                   ...(unbondingAt !== undefined
                     ? ([["Withdrawable", now >= unbondingAt ? "Now" : relative(unbondingAt, now)]] as [string, string][])

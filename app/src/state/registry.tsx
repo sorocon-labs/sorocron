@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { SoroCron, TESTNET, type Config, type Job, type Keeper } from "@sorocron/sdk";
+import { SoroCron, TESTNET, type Config, type Job, type Keeper, type KeeperStats } from "@sorocron/sdk";
 import { signTransaction } from "@stellar/freighter-api";
 
 export const NETWORK = TESTNET;
@@ -15,6 +15,8 @@ export interface RegistryState {
   jobs: Job[];
   /** `undefined` while unknown or without a wallet, `null` when not a keeper. */
   keeper?: Keeper | null;
+  /** The connected keeper's reputation summary, when it is one. */
+  keeperStats?: KeeperStats;
   loading: boolean;
   error?: string;
   updatedAt?: number;
@@ -33,6 +35,7 @@ export function RegistryProvider({ account, children }: { account?: string; chil
   const [version, setVersion] = useState<number>();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [keeper, setKeeper] = useState<Keeper | null>();
+  const [keeperStats, setKeeperStats] = useState<KeeperStats>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [updatedAt, setUpdatedAt] = useState<number>();
@@ -56,16 +59,18 @@ export function RegistryProvider({ account, children }: { account?: string; chil
     if (!cron || inFlight.current) return;
     inFlight.current = true;
     try {
-      const [nextConfig, nextJobs, nextVersion, nextKeeper] = await Promise.all([
+      const [nextConfig, nextJobs, nextVersion, nextKeeper, nextStats] = await Promise.all([
         cron.config(),
         cron.allJobs(),
         cron.version(),
         account ? cron.getKeeper(account) : Promise.resolve(undefined),
+        account ? cron.keeperStats(account).catch(() => undefined) : Promise.resolve(undefined),
       ]);
       setConfig(nextConfig);
       setJobs(nextJobs);
       setVersion(nextVersion);
       setKeeper(account ? (nextKeeper ?? null) : undefined);
+      setKeeperStats(nextStats ?? undefined);
       setError(undefined);
       setUpdatedAt(Date.now());
     } catch (err) {
@@ -84,7 +89,7 @@ export function RegistryProvider({ account, children }: { account?: string; chil
   }, [cron, refresh]);
 
   return (
-    <RegistryContext.Provider value={{ cron, config, version, jobs, keeper, loading, error, updatedAt, refresh }}>
+    <RegistryContext.Provider value={{ cron, config, version, jobs, keeper, keeperStats, loading, error, updatedAt, refresh }}>
       {children}
     </RegistryContext.Provider>
   );
