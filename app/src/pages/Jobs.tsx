@@ -13,7 +13,8 @@ const MATCH: Record<Filter, (status: string) => boolean> = {
   all: () => true,
   due: (s) => s === "due",
   scheduled: (s) => s === "scheduled",
-  attention: (s) => s === "underfunded" || s === "expired",
+  // Failing jobs paused themselves after repeated errors: the owner has to act.
+  attention: (s) => s === "underfunded" || s === "expired" || s === "failing",
   inactive: (s) => s === "paused" || s === "completed",
 };
 
