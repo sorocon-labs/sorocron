@@ -201,6 +201,47 @@ pub struct Upgraded {
     pub previous_version: u32,
 }
 
+/// An upgrade announced with `propose_upgrade`; it can't be applied before
+/// `available_at`.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposed {
+    pub wasm_hash: BytesN<32>,
+    pub available_at: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeCancelled {
+    pub wasm_hash: BytesN<32>,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeDelaySet {
+    pub upgrade_delay: u64,
+}
+
+/// A job handover started with `propose_job_owner`. `proposed` equal to
+/// `owner` means the pending proposal was withdrawn.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobOwnerProposed {
+    #[topic]
+    pub job_id: u64,
+    pub owner: Address,
+    pub proposed: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobOwnerChanged {
+    #[topic]
+    pub job_id: u64,
+    pub previous: Address,
+    pub new_owner: Address,
+}
+
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetHaltSet {

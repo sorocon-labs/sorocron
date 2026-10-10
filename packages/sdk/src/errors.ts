@@ -35,6 +35,9 @@ export const ERRORS = {
   30: ["InvalidSetting", "A fee or share is above its maximum, or a fee ceiling is below the base fee."],
   31: ["TooManyKeepers", "A job's keeper allowlist can have at most 10 keepers."],
   32: ["AwaitingDependency", "This job waits for the job it follows to run again."],
+  33: ["NoPendingUpgrade", "There is no proposed upgrade."],
+  34: ["UpgradeNotReady", "The proposed upgrade's waiting period hasn't passed yet."],
+  35: ["NoPendingOwner", "Nobody has been proposed as this job's new owner."],
 } as const satisfies Record<number, readonly [string, string]>;
 
 export type ErrorCode = keyof typeof ERRORS;

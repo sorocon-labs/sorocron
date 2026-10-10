@@ -99,6 +99,14 @@ export interface Keeper {
   slashed: bigint;
 }
 
+/** A registry code upgrade announced with `propose_upgrade` (v5+). */
+export interface PendingUpgrade {
+  wasm_hash: Uint8Array;
+  proposed_at: bigint;
+  /** Unix time from which `apply_upgrade` can install it. Only ever moves later. */
+  available_at: bigint;
+}
+
 export interface KeeperStats {
   stake: bigint;
   executions: number;

@@ -9,7 +9,7 @@ use crate::config::{address, Config};
 use crate::tx::{self, Error};
 
 /// Registry error names by code (contracts/registry/src/errors.rs).
-const ERRORS: [&str; 32] = [
+const ERRORS: [&str; 35] = [
     "Paused",
     "JobNotFound",
     "InvalidInterval",
@@ -42,6 +42,9 @@ const ERRORS: [&str; 32] = [
     "InvalidSetting",
     "TooManyKeepers",
     "AwaitingDependency",
+    "NoPendingUpgrade",
+    "UpgradeNotReady",
+    "NoPendingOwner",
 ];
 
 /// Turns a simulation error into `Name (#code)` when it is a registry error.

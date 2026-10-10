@@ -93,12 +93,17 @@ jobs
     const cron = await client();
     const job = await cron.getJob(BigInt(id));
     if (!job) throw new Error(`Job ${id} doesn't exist (it may have been cancelled).`);
-    const [due, fee] = await Promise.all([cron.isDue(job.id), cron.currentFee(job.id).catch(() => undefined)]);
+    const [due, fee, pendingOwner] = await Promise.all([
+      cron.isDue(job.id),
+      cron.currentFee(job.id).catch(() => undefined),
+      // Registries before v5 can't transfer jobs.
+      cron.pendingJobOwner(job.id).catch(() => undefined),
+    ]);
     console.log(
       details([
         ["Job", `#${job.id}`],
         ["Status", `${jobStatus(job, now())}${due ? " (a keeper can run it now)" : ""}`],
-        ["Owner", job.owner],
+        ["Owner", pendingOwner ? `${job.owner} (handing over to ${pendingOwner})` : job.owner],
         ["Call", `${job.target}.${job.function}(${job.args.length} args)`],
         ["Schedule", describeSchedule(job)],
         ["Next run", `${new Date(Number(job.next_run) * 1000).toISOString()} (${when(job.next_run)})`],
@@ -178,6 +183,21 @@ simple("withdraw", "Take XLM back from your job", (c, id, a) => c.withdrawJobBal
 simple("pause", "Pause your job", (c, id) => c.setJobActive(id, false), "Paused job #{id}.");
 simple("resume", "Resume your job (clears its failure count)", (c, id) => c.setJobActive(id, true), "Resumed job #{id}.");
 simple("cancel", "Delete your job and refund its balance", (c, id) => c.cancelJob(id), "Cancelled job #{id} and refunded its balance.");
+
+jobs
+  .command("transfer <id> <address>")
+  .description("Hand your job to another account, which must then run `jobs accept`. Pass your own address to withdraw the offer")
+  .action(async (id: string, address: string) => {
+    const cron = await client(true);
+    const { hash } = await cron.proposeJobOwner(BigInt(id), address);
+    const done =
+      address === cron.publicKey
+        ? `Withdrew the pending handover of job #${id}.`
+        : `Offered job #${id} to ${address}. It becomes theirs when they run \`sorocron jobs accept ${id}\`.`;
+    console.log(done + txLine(hash));
+  });
+
+simple("accept", "Take over a job that was transferred to you", (c, id) => c.acceptJobOwner(id), "Job #{id} is now yours.");
 
 // ---------------------------------------------------------------- keeper
 
@@ -276,6 +296,9 @@ program
   .action(async () => {
     const cron = await client();
     const [c, version, count] = await Promise.all([cron.config(), cron.version(), cron.jobCount()]);
+    // Upgrades wait for a delay from v5 on; older registries upgrade immediately.
+    const [delay, upgrade] =
+      version >= 5 ? await Promise.all([cron.upgradeDelay(), cron.pendingUpgrade()]) : [undefined, undefined];
     console.log(
       details([
         ["Registry", `${cron.contractId} (interface v${version})`],
@@ -286,6 +309,13 @@ program
         ["Protocol fee", c.protocol_fee_bps ? `${c.protocol_fee_bps / 100}% to ${c.treasury}` : "none"],
         ["Assigned windows", c.grace_period ? `${formatDuration(c.grace_period)}, slashing ${c.slash_bps / 100}%` : "off"],
         ["Pause after failures", c.max_failures || "never"],
+        ["Upgrade delay", delay === undefined ? "none (upgrades apply immediately)" : formatDuration(delay)],
+        [
+          "Pending upgrade",
+          upgrade
+            ? `${Buffer.from(upgrade.wasm_hash).toString("hex").slice(0, 16)}..., installable ${when(upgrade.available_at)}`
+            : "none",
+        ],
       ]),
     );
   });

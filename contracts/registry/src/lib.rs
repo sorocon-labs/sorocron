@@ -24,12 +24,15 @@ mod storage;
 mod test;
 #[cfg(test)]
 mod test_v4;
+#[cfg(test)]
+mod test_v5;
 mod types;
 
 pub use errors::Error;
 pub use schedule::{first_calendar_run, next_run_after, ramped_fee, split_fee};
 pub use types::{
-    Config, Job, JobParams, JobSpec, JobState, JobUpdate, Keeper, KeeperStats, Schedule,
+    Config, Job, JobParams, JobSpec, JobState, JobUpdate, Keeper, KeeperStats, PendingUpgrade,
+    Schedule,
 };
 
 use executor::ExecutorClient;
@@ -62,7 +65,7 @@ pub const MAX_BPS: u32 = 1_000;
 pub const DEFAULT_MAX_FAILURES: u32 = 3;
 
 /// Returned by `version()`. See its doc comment.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 #[contract]
 pub struct SoroCron;
@@ -316,6 +319,49 @@ impl SoroCron {
         storage::set_state(&env, job_id, &state);
 
         events::JobActiveSet { job_id, active }.publish(&env);
+        Ok(())
+    }
+
+    /// Starts handing a job to `new_owner`, who takes over by calling
+    /// `accept_job_owner`. Proposing again replaces the pending owner, and
+    /// proposing the current owner withdraws the proposal. Owner only.
+    pub fn propose_job_owner(env: Env, job_id: u64, new_owner: Address) -> Result<(), Error> {
+        let spec = storage::get_spec(&env, job_id).ok_or(Error::JobNotFound)?;
+        spec.owner.require_auth();
+
+        if new_owner == spec.owner {
+            storage::remove_pending_owner(&env, job_id);
+        } else {
+            storage::set_pending_owner(&env, job_id, &new_owner);
+        }
+        events::JobOwnerProposed {
+            job_id,
+            owner: spec.owner,
+            proposed: new_owner,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Completes a job handover. Must be signed by the proposed owner. The
+    /// job keeps its id, balance, schedule and run history.
+    pub fn accept_job_owner(env: Env, job_id: u64) -> Result<(), Error> {
+        let mut spec = storage::get_spec(&env, job_id).ok_or(Error::JobNotFound)?;
+        let new_owner = storage::get_pending_owner(&env, job_id).ok_or(Error::NoPendingOwner)?;
+        new_owner.require_auth();
+
+        storage::remove_pending_owner(&env, job_id);
+        storage::remove_owner_job(&env, &spec.owner, job_id);
+        storage::add_owner_job(&env, &new_owner, job_id);
+        let previous = core::mem::replace(&mut spec.owner, new_owner.clone());
+        storage::set_spec(&env, job_id, &spec);
+
+        events::JobOwnerChanged {
+            job_id,
+            previous,
+            new_owner,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -652,22 +698,84 @@ impl SoroCron {
         config.admin.require_auth();
         config.unbonding_epoch = unbonding_epoch;
         storage::set_config(&env, &config);
+        push_back_pending_upgrade(&env, &config);
         events::UnbondingEpochSet { unbonding_epoch }.publish(&env);
     }
 
-    /// Replaces the registry's code, keeping its storage and address.
-    /// Admin only. Job owners trust the admin with this power, so production
-    /// deployments should put the admin behind a multisig or timelock.
-    pub fn upgrade(env: Env, wasm_hash: BytesN<32>) {
+    /// Announces new registry code. `apply_upgrade` installs it once
+    /// `upgrade_delay()` seconds have passed, which gives job owners time to
+    /// review it and leave, and keepers time to unbond and withdraw.
+    /// Proposing again replaces the pending upgrade and restarts the delay.
+    /// Admin only. Returns when the upgrade becomes available.
+    pub fn propose_upgrade(env: Env, wasm_hash: BytesN<32>) -> u64 {
         let config = storage::load_config(&env);
         config.admin.require_auth();
-        env.deployer()
-            .update_current_contract(ContractExecutable::Wasm(wasm_hash.clone()));
-        events::Upgraded {
+        let now = env.ledger().timestamp();
+        let available_at = now.saturating_add(upgrade_delay_for(&env, &config));
+        storage::set_pending_upgrade(
+            &env,
+            &PendingUpgrade {
+                wasm_hash: wasm_hash.clone(),
+                proposed_at: now,
+                available_at,
+            },
+        );
+        events::UpgradeProposed {
             wasm_hash,
+            available_at,
+        }
+        .publish(&env);
+        available_at
+    }
+
+    /// Installs the pending upgrade once its delay has passed, keeping the
+    /// registry's storage and address. Admin only.
+    pub fn apply_upgrade(env: Env) -> Result<(), Error> {
+        let config = storage::load_config(&env);
+        config.admin.require_auth();
+        let pending = storage::get_pending_upgrade(&env).ok_or(Error::NoPendingUpgrade)?;
+        if env.ledger().timestamp() < pending.available_at {
+            return Err(Error::UpgradeNotReady);
+        }
+
+        storage::remove_pending_upgrade(&env);
+        env.deployer()
+            .update_current_contract(ContractExecutable::Wasm(pending.wasm_hash.clone()));
+        events::Upgraded {
+            wasm_hash: pending.wasm_hash,
             previous_version: VERSION,
         }
         .publish(&env);
+        Ok(())
+    }
+
+    /// Withdraws the pending upgrade. Admin only.
+    pub fn cancel_upgrade(env: Env) -> Result<(), Error> {
+        let config = storage::load_config(&env);
+        config.admin.require_auth();
+        let pending = storage::get_pending_upgrade(&env).ok_or(Error::NoPendingUpgrade)?;
+        storage::remove_pending_upgrade(&env);
+        events::UpgradeCancelled {
+            wasm_hash: pending.wasm_hash,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Sets how many seconds a proposed upgrade waits. It can't be shorter
+    /// than a keeper needs to unbond and withdraw (`unbonding_period +
+    /// unbonding_epoch`), so everyone can leave before new code runs.
+    /// Admin only.
+    pub fn set_upgrade_delay(env: Env, upgrade_delay: u64) -> Result<(), Error> {
+        let config = storage::load_config(&env);
+        config.admin.require_auth();
+        if upgrade_delay < min_upgrade_delay(&config) {
+            return Err(Error::InvalidSetting);
+        }
+        storage::set_upgrade_delay(&env, upgrade_delay);
+        push_back_pending_upgrade(&env, &config);
+        events::UpgradeDelaySet { upgrade_delay }.publish(&env);
+        Ok(())
     }
 
     // ------------------------------------------------------------------
@@ -734,6 +842,23 @@ impl SoroCron {
         storage::is_target_halted(&env, &target)
     }
 
+    /// Owner proposed with `propose_job_owner` that hasn't accepted yet.
+    pub fn pending_job_owner(env: Env, job_id: u64) -> Option<Address> {
+        storage::get_pending_owner(&env, job_id)
+    }
+
+    /// The upgrade announced with `propose_upgrade`, if any.
+    pub fn pending_upgrade(env: Env) -> Option<PendingUpgrade> {
+        storage::get_pending_upgrade(&env)
+    }
+
+    /// Seconds a proposed upgrade waits before `apply_upgrade` accepts it:
+    /// the delay set with `set_upgrade_delay`, and never less than
+    /// `unbonding_period + unbonding_epoch`.
+    pub fn upgrade_delay(env: Env) -> u64 {
+        upgrade_delay_for(&env, &storage::load_config(&env))
+    }
+
     /// Jobs with ids in `[start, start + limit)`, skipping cancelled ids.
     /// `limit` is capped at `MAX_GET_JOBS_LIMIT`.
     pub fn get_jobs(env: Env, start: u64, limit: u32) -> Vec<Job> {
@@ -753,8 +878,8 @@ impl SoroCron {
         jobs
     }
 
-    /// Ids of jobs currently owned by `owner`, most recently created last.
-    /// Cancelled jobs are removed from this list.
+    /// Ids of jobs currently owned by `owner`, in the order they were created
+    /// or handed to `owner`. Cancelled jobs are removed from this list.
     pub fn jobs_by_owner(env: Env, owner: Address) -> Vec<u64> {
         storage::owner_jobs(&env, &owner)
     }
@@ -1195,6 +1320,34 @@ fn release_stake(env: &Env, config: &Config, keeper: &Address) -> Result<i128, E
     }
     .publish(env);
     Ok(info.stake)
+}
+
+/// The longest a keeper can need to unbond and withdraw, which is the
+/// shortest an upgrade may wait.
+fn min_upgrade_delay(config: &Config) -> u64 {
+    config
+        .unbonding_period
+        .saturating_add(config.unbonding_epoch)
+}
+
+fn upgrade_delay_for(env: &Env, config: &Config) -> u64 {
+    storage::get_upgrade_delay(env).max(min_upgrade_delay(config))
+}
+
+/// A longer epoch or delay set after an upgrade was announced pushes the
+/// upgrade back, and shortening them again doesn't bring it forward.
+/// Otherwise an admin could lengthen unbonding after the announcement, then
+/// shorten it, and apply the upgrade before keepers who reacted could leave.
+fn push_back_pending_upgrade(env: &Env, config: &Config) {
+    if let Some(mut pending) = storage::get_pending_upgrade(env) {
+        let at = pending
+            .proposed_at
+            .saturating_add(upgrade_delay_for(env, config));
+        if at > pending.available_at {
+            pending.available_at = at;
+            storage::set_pending_upgrade(env, &pending);
+        }
+    }
 }
 
 fn ensure_not_paused(config: &Config) -> Result<(), Error> {

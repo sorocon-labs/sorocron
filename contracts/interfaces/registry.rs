@@ -17,7 +17,6 @@ pub trait Contract {
         job_id: u64,
     ) -> Result<(), Error>;
     fn get_job(env: soroban_sdk::Env, job_id: u64) -> Option<Job>;
-    fn upgrade(env: soroban_sdk::Env, wasm_hash: soroban_sdk::BytesN<32>);
     fn version(env: soroban_sdk::Env) -> u32;
     fn fund_job(
         env: soroban_sdk::Env,
@@ -66,6 +65,7 @@ pub trait Contract {
         min_stake: i128,
         unbonding_period: u64,
     );
+    fn apply_upgrade(env: soroban_sdk::Env) -> Result<(), Error>;
     fn execute_batch(
         env: soroban_sdk::Env,
         keeper: soroban_sdk::Address,
@@ -79,7 +79,9 @@ pub trait Contract {
     fn pending_admin(env: soroban_sdk::Env) -> Option<soroban_sdk::Address>;
     fn propose_admin(env: soroban_sdk::Env, new_admin: soroban_sdk::Address);
     fn set_min_stake(env: soroban_sdk::Env, min_stake: i128) -> Result<(), Error>;
+    fn upgrade_delay(env: soroban_sdk::Env) -> u64;
     fn active_keepers(env: soroban_sdk::Env) -> soroban_sdk::Vec<soroban_sdk::Address>;
+    fn cancel_upgrade(env: soroban_sdk::Env) -> Result<(), Error>;
     fn set_job_active(
         env: soroban_sdk::Env,
         job_id: u64,
@@ -97,10 +99,13 @@ pub trait Contract {
         env: soroban_sdk::Env,
         keeper: soroban_sdk::Address,
     ) -> Result<u64, Error>;
+    fn pending_upgrade(env: soroban_sdk::Env) -> Option<PendingUpgrade>;
+    fn propose_upgrade(env: soroban_sdk::Env, wasm_hash: soroban_sdk::BytesN<32>) -> u64;
     fn withdraw_stakes(
         env: soroban_sdk::Env,
         keepers: soroban_sdk::Vec<soroban_sdk::Address>,
     ) -> Result<soroban_sdk::Vec<i128>, Error>;
+    fn accept_job_owner(env: soroban_sdk::Env, job_id: u64) -> Result<(), Error>;
     fn is_target_halted(env: soroban_sdk::Env, target: soroban_sdk::Address) -> bool;
     fn set_max_failures(env: soroban_sdk::Env, max_failures: u32);
     fn set_min_interval(env: soroban_sdk::Env, min_interval: u64);
@@ -109,11 +114,21 @@ pub trait Contract {
         protocol_fee_bps: u32,
         treasury: Option<soroban_sdk::Address>,
     ) -> Result<(), Error>;
+    fn pending_job_owner(
+        env: soroban_sdk::Env,
+        job_id: u64,
+    ) -> Option<soroban_sdk::Address>;
+    fn propose_job_owner(
+        env: soroban_sdk::Env,
+        job_id: u64,
+        new_owner: soroban_sdk::Address,
+    ) -> Result<(), Error>;
     fn set_target_halted(
         env: soroban_sdk::Env,
         target: soroban_sdk::Address,
         halted: bool,
     );
+    fn set_upgrade_delay(env: soroban_sdk::Env, upgrade_delay: u64) -> Result<(), Error>;
     fn set_keeper_windows(
         env: soroban_sdk::Env,
         grace_period: u64,
@@ -233,6 +248,13 @@ pub struct KeeperStats {
 }
 #[soroban_sdk::contracttype]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct PendingUpgrade {
+    pub available_at: u64,
+    pub proposed_at: u64,
+    pub wasm_hash: soroban_sdk::BytesN<32>,
+}
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Schedule {
     Interval,
     Daily(u32, u32),
@@ -273,6 +295,9 @@ pub enum Error {
     InvalidSetting = 30,
     TooManyKeepers = 31,
     AwaitingDependency = 32,
+    NoPendingUpgrade = 33,
+    UpgradeNotReady = 34,
+    NoPendingOwner = 35,
 }
 #[soroban_sdk::contractevent(topics = ["upgraded"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -435,6 +460,14 @@ pub struct ProtocolFeeSet {
     pub protocol_fee_bps: u32,
     pub treasury: Option<soroban_sdk::Address>,
 }
+#[soroban_sdk::contractevent(topics = ["job_owner_changed"])]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct JobOwnerChanged {
+    #[topic]
+    pub job_id: u64,
+    pub previous: soroban_sdk::Address,
+    pub new_owner: soroban_sdk::Address,
+}
 #[soroban_sdk::contractevent(topics = ["keeper_unbonding"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct KeeperUnbonding {
@@ -449,11 +482,35 @@ pub struct KeeperWithdrawn {
     pub keeper: soroban_sdk::Address,
     pub amount: i128,
 }
+#[soroban_sdk::contractevent(topics = ["upgrade_delay_set"])]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct UpgradeDelaySet {
+    pub upgrade_delay: u64,
+}
+#[soroban_sdk::contractevent(topics = ["upgrade_proposed"])]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct UpgradeProposed {
+    pub wasm_hash: soroban_sdk::BytesN<32>,
+    pub available_at: u64,
+}
+#[soroban_sdk::contractevent(topics = ["job_owner_proposed"])]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct JobOwnerProposed {
+    #[topic]
+    pub job_id: u64,
+    pub owner: soroban_sdk::Address,
+    pub proposed: soroban_sdk::Address,
+}
 #[soroban_sdk::contractevent(topics = ["keeper_windows_set"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct KeeperWindowsSet {
     pub grace_period: u64,
     pub slash_bps: u32,
+}
+#[soroban_sdk::contractevent(topics = ["upgrade_cancelled"])]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct UpgradeCancelled {
+    pub wasm_hash: soroban_sdk::BytesN<32>,
 }
 #[soroban_sdk::contractevent(topics = ["unbonding_epoch_set"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]

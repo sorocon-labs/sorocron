@@ -815,7 +815,10 @@ fn upgrade_to_real_wasm_preserves_state() {
         .env
         .deployer()
         .upload_contract_wasm(Bytes::from_slice(&s.env, &wasm));
-    s.cron.upgrade(&hash);
+    s.cron.propose_upgrade(&hash);
+    advance(&s.env, s.cron.upgrade_delay());
+    s.cron.apply_upgrade();
+    assert_eq!(s.cron.pending_upgrade(), None);
 
     // Now running the uploaded WASM against the same storage.
     assert_eq!(s.cron.version(), VERSION);

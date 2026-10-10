@@ -24,4 +24,14 @@ export {
   type LeaderboardRow,
 } from "./events.js";
 export { TESTNET, type NetworkConfig } from "./networks.js";
-export type { Config, Job, JobParams, JobState, JobUpdate, Keeper, KeeperStats, Schedule } from "./types.js";
+export type {
+  Config,
+  Job,
+  JobParams,
+  JobState,
+  JobUpdate,
+  Keeper,
+  KeeperStats,
+  PendingUpgrade,
+  Schedule,
+} from "./types.js";

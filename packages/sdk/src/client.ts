@@ -13,7 +13,7 @@ import { contract, rpc } from "@stellar/stellar-sdk";
 import { SoroCronError, parseContractError } from "./errors.js";
 import type { NetworkConfig } from "./networks.js";
 import { fetchEvents, toExecution, type EventPage, type Execution, type FetchEventsOptions } from "./events.js";
-import type { Config, Job, JobParams, JobState, JobUpdate, Keeper, KeeperStats } from "./types.js";
+import type { Config, Job, JobParams, JobState, JobUpdate, Keeper, KeeperStats, PendingUpgrade } from "./types.js";
 
 export interface ConnectOptions {
   network: NetworkConfig;
@@ -184,6 +184,21 @@ export class SoroCron {
     return this.read("current_fee", { job_id: jobId });
   }
 
+  /** Account proposed as the job's new owner that hasn't accepted yet (v5+). */
+  pendingJobOwner(jobId: bigint): Promise<string | undefined> {
+    return this.read("pending_job_owner", { job_id: jobId });
+  }
+
+  /** Code upgrade the admin has announced, if any (v5+). */
+  pendingUpgrade(): Promise<PendingUpgrade | undefined> {
+    return this.read("pending_upgrade");
+  }
+
+  /** Seconds an announced upgrade waits before it can be installed (v5+). */
+  upgradeDelay(): Promise<bigint> {
+    return this.read("upgrade_delay");
+  }
+
   // --------------------------------------------------------------- events
 
   /** Soroban RPC client for this network. */
@@ -280,6 +295,20 @@ export class SoroCron {
 
   cancelJob(jobId: bigint): Promise<Sent<bigint>> {
     return this.send("cancel_job", { job_id: jobId });
+  }
+
+  /**
+   * Starts handing a job to `newOwner`, who completes it with
+   * `acceptJobOwner`. Proposing this client's own account withdraws a
+   * pending proposal (v5+).
+   */
+  proposeJobOwner(jobId: bigint, newOwner: string): Promise<Sent<void>> {
+    return this.send("propose_job_owner", { job_id: jobId, new_owner: newOwner });
+  }
+
+  /** Takes over a job proposed to this client's account (v5+). */
+  acceptJobOwner(jobId: bigint): Promise<Sent<void>> {
+    return this.send("accept_job_owner", { job_id: jobId });
   }
 
   /**
