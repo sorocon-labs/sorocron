@@ -48,7 +48,12 @@ Each tick it:
    only have one transaction in flight. With `CHANNEL_SECRET_KEYS` set, each
    channel account pays for and sequences a batch while the keeper only
    signs its authorization, so N channels send N batches at once.
-5. **Fails over between RPC endpoints.** With several comma-separated
+5. **Restores archived state when allowed.** If a job's target was archived
+   (its TTL ran out), simulation asks for a `RestoreFootprint` first. With
+   `MAX_RESTORE_FEE_STROOPS` set, the keeper sends the restore when its
+   resource fee is within that limit and runs the batch in the same tick;
+   otherwise it logs what the restore would cost and skips the batch.
+6. **Fails over between RPC endpoints.** With several comma-separated
    `STELLAR_RPC_URLS`, it probes each one every tick and uses the first that
    answers, isn't failing ticks, and is within 10 ledgers of the
    furthest-ahead endpoint. It goes back to the preferred endpoint after five
@@ -90,6 +95,8 @@ poll intervals.
 | `sorocron_keeper_balance_stroops{account}` | gauge | XLM balance of the keeper and each channel |
 | `sorocron_keeper_inclusion_fee_stroops` | gauge | Current inclusion fee bid |
 | `sorocron_keeper_rpc_calls_last_sync` | gauge | RPC calls the last index sync made |
+| `sorocron_keeper_restores_total` | counter | Archived-state restores sent before executing |
+| `sorocron_keeper_restore_fees_stroops_total` | counter | Resource fees of those restores |
 | `sorocron_keeper_rpc_up{endpoint}` | gauge | With several endpoints: whether each answered its last probe |
 | `sorocron_keeper_rpc_active{endpoint}` | gauge | 1 for the endpoint in use, 0 for the others |
 | `sorocron_keeper_rpc_latest_ledger{endpoint}` | gauge | Latest ledger each endpoint reported |

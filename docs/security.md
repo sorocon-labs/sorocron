@@ -79,7 +79,7 @@ Policy:
 
 - **Admin trust:** the admin can pause the registry, halt targets, change `min_stake`, set the protocol fee and slash share (each capped at 10%), connect the executor once and announce upgrades. The admin cannot move escrowed funds except through an upgrade, and an upgrade can't run until users have had time to withdraw. Handover uses a two-step `propose_admin` / `accept_admin` flow.
 - **Rotation size:** at most 64 keepers take part in assigned windows; others can still run any job after its window.
-- **Lateness metrics** are averages over a keeper's lifetime, not a sliding window.
+- **Recent reputation** (`recent_lateness`, `recent_miss_bps`) is a moving average where each run counts for 1/8, not an exact window, and misses are weighed against executions of any job, not only the keeper's assigned runs.
 
 See the [threat model](threat-model.md) for a structured list of threats and open risks.
 
