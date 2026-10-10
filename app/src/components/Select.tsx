@@ -8,9 +8,10 @@ export interface Option<T extends string> {
 }
 
 /**
- * Listbox select that replaces the native <select>. Keyboard: Enter/Space
- * or arrows to open, arrows to move, Enter to choose, Escape to close, and
- * typing a letter jumps to the first matching option.
+ * Select-only combobox (WAI-ARIA pattern) that replaces the native <select>.
+ * Keyboard: Enter, Space or arrows open it; arrows, Home and End move;
+ * Enter or Space chooses; Escape or Tab closes; typing a letter jumps to the
+ * first matching option.
  */
 export function Select<T extends string>({
   value,
@@ -45,6 +46,11 @@ export function Select<T extends string>({
     if (open) setActive(Math.max(0, options.findIndex((o) => o.value === value)));
   }, [open, options, value]);
 
+  // Keep the highlighted option visible in long lists such as hours.
+  useEffect(() => {
+    if (open) document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [open, active, listId]);
+
   const choose = (index: number) => {
     onChange(options[index].value);
     setOpen(false);
@@ -69,6 +75,12 @@ export function Select<T extends string>({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive((i) => Math.max(0, i - 1));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActive(options.length - 1);
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       choose(active);
@@ -85,6 +97,7 @@ export function Select<T extends string>({
       <button
         ref={button}
         type="button"
+        role="combobox"
         className="select-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
