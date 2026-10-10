@@ -24,6 +24,12 @@ pub struct Config {
     pub once: bool,
     /// Simulate everything but never send.
     pub dry_run: bool,
+    /// Jobs per `execute_batch` (1-20).
+    pub batch_size: usize,
+    /// Skip batches whose XLM fees minus network cost are below this, in stroops.
+    pub min_profit: i128,
+    /// Serve `/metrics` and `/healthz` on this port; 0 turns the server off.
+    pub metrics_port: u16,
 }
 
 #[derive(Debug)]
@@ -129,6 +135,14 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(1_000);
+        let number = |name: &str, default: i128| -> Result<i128, ConfigError> {
+            match env::var(name).ok().filter(|v| !v.is_empty()) {
+                None => Ok(default),
+                Some(v) => v
+                    .parse()
+                    .map_err(|_| ConfigError(format!("{name} must be a number (got {v})"))),
+            }
+        };
         Ok(Config {
             network,
             rpc_url,
@@ -139,6 +153,10 @@ impl Config {
             inclusion_fee,
             once: args.iter().any(|a| a == "--once"),
             dry_run,
+            batch_size: number("BATCH_SIZE", 10)?.clamp(1, 20) as usize,
+            min_profit: number("MIN_PROFIT_STROOPS", 0)?,
+            metrics_port: u16::try_from(number("METRICS_PORT", 0)?)
+                .map_err(|_| ConfigError("METRICS_PORT must be a port number".into()))?,
         })
     }
 }
