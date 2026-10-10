@@ -164,6 +164,10 @@ const STATUS: Record<JobStatus, { label: string; tone: string }> = {
   completed: { label: "Completed", tone: "gray" },
 };
 
+export function statusLabel(status: JobStatus): string {
+  return STATUS[status].label;
+}
+
 export function StatusBadge({ status }: { status: JobStatus }) {
   const s = STATUS[status];
   return <span className={`badge badge-${s.tone}`}>{s.label}</span>;
@@ -227,7 +231,7 @@ export function Card({ title, action, children, className }: { title?: string; a
     <section className={`card ${className ?? ""}`}>
       {(title || action) && (
         <header className="card-head">
-          {title && <h3>{title}</h3>}
+          {title && <h2>{title}</h2>}
           {action}
         </header>
       )}

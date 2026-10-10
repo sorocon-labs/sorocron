@@ -12,8 +12,8 @@
   --line-strong: #dcdbd6;
   --ink: #1f2124;
   --ink-2: #4a4c50;
-  --muted: #787774;
-  --faint: #a8a7a3;
+  --muted: #6e6d6b;
+  --faint: #8b8a87;
   --solid: #111111;
   --solid-hover: #2e2e2e;
   --on-solid: #ffffff;
@@ -52,7 +52,7 @@
   --ink: #ecebe7;
   --ink-2: #c4c3be;
   --muted: #8f8e89;
-  --faint: #64635f;
+  --faint: #6e6d69;
   --solid: #ecebe7;
   --solid-hover: #ffffff;
   --on-solid: #161615;
@@ -228,7 +228,7 @@ p {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--faint);
+  color: var(--muted);
   padding: 0 10px 6px;
 }
 .nav-item {
@@ -576,7 +576,7 @@ p {
   gap: 12px;
   margin-bottom: 18px;
 }
-.card-head h3 {
+.card-head h2 {
   font-size: 13px;
   font-weight: 550;
   color: var(--ink-2);
@@ -654,7 +654,7 @@ p {
 .stat-hint {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--faint);
+  color: var(--muted);
 }
 
 .facts {
@@ -840,7 +840,7 @@ p {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--faint);
+  color: var(--muted);
   border-bottom: 1px solid var(--line);
 }
 .table-row {
@@ -849,8 +849,13 @@ p {
   transition: background 150ms;
   font-variant-numeric: tabular-nums;
 }
-.table-row:last-child {
+.table > .table-row:last-child,
+.table > [role="listitem"]:last-child > .table-row {
   border-bottom: 0;
+}
+/* List items in job lists exist for assistive technology only. */
+.table > [role="listitem"] {
+  display: contents;
 }
 a.table-row:hover {
   background: var(--surface-2);
@@ -878,7 +883,7 @@ a.table-row:hover {
   color: var(--ink);
 }
 .job-target {
-  color: var(--faint);
+  color: var(--muted);
   font-size: 12px;
 }
 .row-arrow {
@@ -1010,7 +1015,7 @@ a.list-row:hover {
   border-bottom: 0;
 }
 .code-n {
-  color: var(--faint);
+  color: var(--muted);
 }
 
 .leaderboard .table-head,
@@ -1026,11 +1031,11 @@ a.list-row:hover {
 .rank {
   font-family: var(--mono);
   font-size: 12.5px;
-  color: var(--faint);
+  color: var(--muted);
 }
 .card-note {
   font-size: 12.5px;
-  color: var(--faint);
+  color: var(--muted);
 }
 
 /* ---- job detail ------------------------------------------------------------ */
@@ -1113,7 +1118,7 @@ a.list-row:hover {
 .arg-index {
   font-family: var(--mono);
   font-size: 11.5px;
-  color: var(--faint);
+  color: var(--muted);
   width: 14px;
   flex: none;
 }
@@ -1121,7 +1126,7 @@ a.list-row:hover {
   margin-left: 8px;
   font-family: var(--sans);
   font-size: 11px;
-  color: var(--faint);
+  color: var(--muted);
 }
 
 /* ---- forms --------------------------------------------------------------- */
@@ -1177,7 +1182,7 @@ a.list-row:hover {
   appearance: none;
 }
 .input::placeholder {
-  color: var(--faint);
+  color: var(--muted);
 }
 .input:hover {
   border-color: var(--line-strong);
@@ -1293,7 +1298,7 @@ a.list-row:hover {
   gap: 10px;
 }
 .select-list li small {
-  color: var(--faint);
+  color: var(--muted);
   font-size: 12px;
 }
 .select-list li.active {
@@ -1339,7 +1344,7 @@ a.list-row:hover {
 }
 .segmented .count {
   font-size: 11px;
-  color: var(--faint);
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1455,7 +1460,7 @@ a.list-row:hover {
   color: var(--muted);
 }
 .datepicker-trigger.placeholder span {
-  color: var(--faint);
+  color: var(--muted);
 }
 .datepicker-pop {
   position: absolute;
@@ -1482,10 +1487,15 @@ a.list-row:hover {
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
 }
+
+/* Rows exist for assistive technology; the grid lays out the cells. */
+.cal-grid > [role="row"] {
+  display: contents;
+}
 .cal-dow {
   text-align: center;
   font-size: 11px;
-  color: var(--faint);
+  color: var(--muted);
   padding: 4px 0;
 }
 .cal-day {
@@ -1501,7 +1511,7 @@ a.list-row:hover {
   background: var(--sunken);
 }
 .cal-day.outside {
-  color: var(--faint);
+  color: var(--muted);
 }
 .cal-day.today {
   box-shadow: inset 0 0 0 1px var(--line-strong);
@@ -1592,7 +1602,7 @@ a.list-row:hover {
 }
 .stepper small {
   font-size: 12px;
-  color: var(--faint);
+  color: var(--muted);
 }
 .stepper strong {
   font-weight: 500;
@@ -1723,7 +1733,7 @@ a.list-row:hover {
   align-items: center;
   padding: 10px 0 4px;
 }
-.review-section h3 {
+.review-section h2 {
   font-size: 13px;
   font-weight: 550;
   color: var(--ink-2);
@@ -2267,7 +2277,7 @@ a.list-row:hover {
     gap: 3px;
     border: 0;
     background: none;
-    color: var(--faint);
+    color: var(--muted);
     font-size: 10.5px;
     font-weight: 500;
     letter-spacing: 0.01em;

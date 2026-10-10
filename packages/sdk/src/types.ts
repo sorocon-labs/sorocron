@@ -114,4 +114,8 @@ export interface KeeperStats {
   missed: number;
   slashed: bigint;
   eligible: boolean;
+  /** Lateness averaged over roughly the last eight runs (v5+). */
+  recent_lateness?: bigint;
+  /** Share of recent runs and missed windows that were misses, in basis points (v5+). */
+  recent_miss_bps?: number;
 }

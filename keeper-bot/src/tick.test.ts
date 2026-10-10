@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Prepared } from "@sorocron/sdk";
+import { RestoreRequiredError, type Prepared } from "@sorocron/sdk";
 import { ChannelPool } from "./channels.js";
 import { tick, type BatchClient, type DueSource, type FeeBidder, type TickDeps } from "./tick.js";
 
@@ -152,5 +152,65 @@ describe("tick", () => {
     const d = deps({ index: index(due(1, 2)), channels: new ChannelPool([broken]) });
     const summary = await tick(d, 1_000n);
     expect(summary).toMatchObject({ skipped: 2, executed: 0 });
+  });
+
+  describe("archived state (#111)", () => {
+    /** A channel whose first simulation needs a restore costing `fee`. */
+    function archived(fee: bigint, restore: () => Promise<{ hash: string }>) {
+      const inner = channel(() => true);
+      let restored = false;
+      const calls = { restores: 0 };
+      const client: BatchClient = {
+        async prepareExecuteBatch(ids, keeper) {
+          if (!restored) {
+            throw new RestoreRequiredError(fee, async () => {
+              calls.restores++;
+              const r = await restore();
+              restored = true;
+              return r;
+            });
+          }
+          return inner.prepareExecuteBatch(ids, keeper);
+        },
+      };
+      return { client, calls };
+    }
+
+    it("doesn't restore unless MAX_RESTORE_FEE_STROOPS allows it", async () => {
+      const { client, calls } = archived(5_000n, async () => ({ hash: "r" }));
+      const d = deps({ index: index(due(1)), channels: new ChannelPool([client]) });
+      const summary = await tick(d, 0n);
+      expect(calls.restores).toBe(0);
+      expect(summary).toMatchObject({ skipped: 1, executed: 0, restores: 0 });
+      expect(d.lines.join(" | ")).toMatch(/set MAX_RESTORE_FEE_STROOPS/);
+    });
+
+    it("restores within the limit and runs the job in the same tick", async () => {
+      const { client, calls } = archived(5_000n, async () => ({ hash: "r" }));
+      const d = deps({ index: index(due(1)), channels: new ChannelPool([client]), maxRestoreFee: 5_000n });
+      const summary = await tick(d, 0n);
+      expect(calls.restores).toBe(1);
+      expect(summary).toMatchObject({ executed: 1, skipped: 0, restores: 1, restoreFeeStroops: 5_000n });
+      expect(d.lines[0]).toMatch(/restored archived state for ~5000 stroops/);
+    });
+
+    it("never pays more than the limit for a restore", async () => {
+      const { client, calls } = archived(5_001n, async () => ({ hash: "r" }));
+      const d = deps({ index: index(due(1)), channels: new ChannelPool([client]), maxRestoreFee: 5_000n });
+      const summary = await tick(d, 0n);
+      expect(calls.restores).toBe(0);
+      expect(summary).toMatchObject({ skipped: 1, restores: 0 });
+      expect(d.lines.join(" | ")).toMatch(/above MAX_RESTORE_FEE_STROOPS \(5000\)/);
+    });
+
+    it("skips the batch when the restore itself fails", async () => {
+      const { client } = archived(5_000n, async () => {
+        throw new Error("Restore transaction failed");
+      });
+      const d = deps({ index: index(due(1)), channels: new ChannelPool([client]), maxRestoreFee: 10_000n });
+      const summary = await tick(d, 0n);
+      expect(summary).toMatchObject({ skipped: 1, executed: 0, restores: 0 });
+      expect(d.lines.join(" | ")).toMatch(/Restore transaction failed/);
+    });
   });
 });

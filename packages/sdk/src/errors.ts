@@ -47,6 +47,27 @@ const BY_NAME = new Map<string, ErrorCode>(
   Object.entries(ERRORS).map(([code, [name]]) => [name, Number(code) as ErrorCode]),
 );
 
+/**
+ * Simulation found archived ledger entries: the call can't run until a
+ * `RestoreFootprint` transaction brings them back. `fee` is the restore's
+ * minimum resource fee in stroops, and `restore()` sends it from the
+ * client's account.
+ */
+export class RestoreRequiredError extends Error {
+  constructor(
+    readonly fee: bigint,
+    readonly restore: () => Promise<{ hash: string }>,
+  ) {
+    super(`Archived contract state must be restored first (resource fee ${fee} stroops)`);
+    this.name = "RestoreRequiredError";
+  }
+}
+
+/** Whether `err` is a `RestoreRequiredError`, even across module copies. */
+export function isRestoreRequired(err: unknown): err is RestoreRequiredError {
+  return err instanceof RestoreRequiredError || (err as { name?: unknown } | null)?.name === "RestoreRequiredError";
+}
+
 /** A registry call rejected by the contract, with its code and a readable message. */
 export class SoroCronError extends Error {
   constructor(

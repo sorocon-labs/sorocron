@@ -32,6 +32,7 @@ documents each one. The important ones:
 | `CHANNEL_SECRET_KEYS` | Optional extra accounts that pay for and sequence transactions, so batches go out in parallel. **Secret.** |
 | `STELLAR_NETWORK`, `STELLAR_RPC_URL` | `testnet`, `mainnet` or `local`, and the RPC to use |
 | `STELLAR_RPC_URLS` | Several RPC endpoints, most preferred first; the keeper fails over between them |
+| `MAX_RESTORE_FEE_STROOPS` | Restore archived contract state when it costs at most this; off by default |
 | `SOROCRON_CONTRACT_ID` | Registry address; defaults to `deployments/<network>.json` |
 | `BATCH_SIZE` | Jobs per transaction, up to 20 |
 | `FEE_PERCENTILE`, `MAX_INCLUSION_FEE` | Inclusion fee bidding |

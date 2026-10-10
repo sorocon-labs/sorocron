@@ -115,6 +115,13 @@ pub fn split_fee(amount: i128, bps: u32) -> (i128, i128) {
 /// When stake becomes withdrawable for a keeper that starts unbonding at
 /// `now`. With epochs, the unbonding period starts at the end of the current
 /// epoch, so every keeper that unbonds within one epoch is released together.
+/// Adds `sample` to a moving average kept scaled by 8 (as TCP smooths
+/// round-trip times): each sample counts for 1/8, and `scaled / 8` settles
+/// exactly on a repeated sample instead of drifting with integer rounding.
+pub fn smooth(scaled: u64, sample: u64) -> u64 {
+    (scaled - scaled / 8).saturating_add(sample)
+}
+
 pub fn unbonding_release(now: u64, period: u64, epoch: u64) -> u64 {
     let start = match now.checked_div(epoch) {
         None => now,

@@ -642,7 +642,7 @@ function ReviewSection({ title, onEdit, children }: { title: string; onEdit: () 
   return (
     <section className="review-section">
       <header>
-        <h3>{title}</h3>
+        <h2>{title}</h2>
         <button type="button" className="link-btn" onClick={onEdit}>
           Edit
         </button>

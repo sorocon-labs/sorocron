@@ -192,6 +192,22 @@ pub struct KeeperStats {
     pub slashed: i128,
     /// Whether the keeper can currently execute (staked enough, not unbonding).
     pub eligible: bool,
+    /// Lateness averaged over the keeper's recent runs: each run counts for
+    /// 1/8, so this follows roughly the last eight.
+    pub recent_lateness: u64,
+    /// Of the keeper's recent executions and missed windows, the share that
+    /// were misses, in basis points (each counts for 1/8).
+    pub recent_miss_bps: u32,
+}
+
+/// Recent performance behind `KeeperStats::recent_*`, stored apart from
+/// `Keeper` so existing keeper entries keep their layout. Both values are
+/// eight times a moving average, which keeps integer rounding from drifting.
+#[contracttype]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct KeeperRecent {
+    pub lateness: u64,
+    pub misses: u64,
 }
 
 /// A code upgrade announced with `propose_upgrade`.
@@ -227,4 +243,6 @@ pub enum DataKey {
     PendingUpgrade,
     /// Owner proposed with `propose_job_owner`, per job.
     PendingJobOwner(u64),
+    /// `KeeperRecent` of a keeper.
+    KeeperRecent(Address),
 }

@@ -10,7 +10,7 @@
  * transactions; reads work without them.
  */
 import { contract, rpc } from "@stellar/stellar-sdk";
-import { SoroCronError, parseContractError } from "./errors.js";
+import { RestoreRequiredError, SoroCronError, parseContractError } from "./errors.js";
 import type { NetworkConfig } from "./networks.js";
 import { fetchEvents, toExecution, type EventPage, type Execution, type FetchEventsOptions } from "./events.js";
 import type { Config, Job, JobParams, JobState, JobUpdate, Keeper, KeeperStats, PendingUpgrade } from "./types.js";
@@ -242,6 +242,17 @@ export class SoroCron {
       tx = await fn.call(this.client, args, this.inclusionFee ? { fee: String(this.inclusionFee) } : undefined);
     } catch (err) {
       throw parseContractError(err) ?? err;
+    }
+    const simulation = tx.simulation;
+    if (simulation && rpc.Api.isSimulationRestore(simulation)) {
+      const preamble = simulation.restorePreamble;
+      throw new RestoreRequiredError(BigInt(preamble.minResourceFee), async () => {
+        const restored = await tx.restoreFootprint(preamble);
+        if (restored.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+          throw new Error(`Restore transaction ${restored.status.toLowerCase()}`);
+        }
+        return { hash: restored.txHash };
+      });
     }
     const result = unwrapResult<T>(tx.result);
     const resourceFee = BigInt(tx.simulationData?.transactionData.resourceFee ?? 0n);

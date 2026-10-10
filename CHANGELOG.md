@@ -11,6 +11,10 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - **npm releases**: release tags publish `@sorocron/sdk` and `@sorocron/react` to npm with provenance, and CI checks what would be published on every pull request. Published packages export only the build. ([#115](https://github.com/sorocon-labs/sorocron/issues/115))
 - **Callback tests**: targets and resolvers that call back into the registry mid-run (execute, batch, cancel, fund, withdraw, update) are rejected and leave every balance consistent. ([#118](https://github.com/sorocon-labs/sorocron/issues/118))
 - **Dashboard tests**: the New Job form and how every job status is shown, run in CI. ([#119](https://github.com/sorocon-labs/sorocron/issues/119))
+- **Recent keeper reputation**: `keeper_stats` adds `recent_lateness` and `recent_miss_bps`, moving averages where each run counts for 1/8, kept in a small entry of their own so a run costs the same however long a keeper has run. Shown by `sorocron keeper status` and the dashboard. ([#122](https://github.com/sorocon-labs/sorocron/issues/122))
+- **Archived-state restores**: with `MAX_RESTORE_FEE_STROOPS` set, the keeper restores a job target's archived state when the restore costs at most that, then runs the job in the same tick; the SDK raises `RestoreRequiredError` with the restore's fee and a `restore()` function. ([#111](https://github.com/sorocon-labs/sorocron/issues/111))
+- **Rust keeper batching and metrics**: `keeper-rs` runs due jobs in `execute_batch` transactions, sends only batches that run something and pay for themselves, and serves `/metrics` and `/healthz` with the TypeScript keeper's metric names. ([#116](https://github.com/sorocon-labs/sorocron/issues/116))
+- **Dashboard accessibility**: selects are WAI-ARIA comboboxes with Home and End, the date picker's calendar has rows and arrow-key, Page Up and Page Down navigation and returns focus on close, job lists name each job with its status and schedule, headings follow the page outline, and secondary text meets WCAG AA contrast in both themes. `axe-core` checks run in CI. ([#120](https://github.com/sorocon-labs/sorocron/issues/120))
 
 ### Fixed
 - The dashboard's Attention filter now includes failing jobs, which were only listed under All.
@@ -19,6 +23,7 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - Debug builds compile dependencies without debug info and the workspace with line tables only: the registry's test build drops from 1.9 GB to 0.9 GB.
 
 ### Interface
+- `KeeperStats` gains `recent_lateness` and `recent_miss_bps`.
 - Interface version 5. New functions: `propose_upgrade`, `apply_upgrade`, `cancel_upgrade`, `set_upgrade_delay`, `pending_upgrade`, `upgrade_delay`, `propose_job_owner`, `accept_job_owner`, `pending_job_owner`. Removed: `upgrade`.
 - New errors: `NoPendingUpgrade` (33), `UpgradeNotReady` (34), `NoPendingOwner` (35).
 - New events: `UpgradeProposed`, `UpgradeCancelled`, `UpgradeDelaySet`, `JobOwnerProposed`, `JobOwnerChanged`. New type: `PendingUpgrade`.

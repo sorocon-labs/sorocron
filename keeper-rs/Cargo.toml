@@ -18,7 +18,7 @@ stellar-strkey = "0.0.18"
 ed25519-dalek = "2.2"
 sha2 = "0.10"
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "net", "io-util"] }
 
 # Debug builds (tests, clippy, coverage): dependencies build without debug
 # info and our own crates keep only line tables, which is enough for

@@ -128,6 +128,17 @@ fn main() {
     cron.execute(&keeper, &id);
     measure(&env, "execute (steady state)", &mut rows);
 
+    // Reputation is kept as moving averages, so a run costs the same however
+    // long the keeper has been running.
+    cron.fund_job(&owner, &id, &(FEE * 200));
+    for run in 2..102 {
+        env.ledger().set_timestamp(START + run * INTERVAL);
+        cron.execute(&keeper, &id);
+    }
+    env.ledger().set_timestamp(START + 102 * INTERVAL);
+    cron.execute(&keeper, &id);
+    measure(&env, "execute (after 100 runs)", &mut rows);
+
     // A job carrying 1 KB of arguments: since v4 a run rewrites only the
     // small state entry, so this costs about the same to execute.
     let mut big = params(&env, &target);

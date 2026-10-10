@@ -29,7 +29,7 @@ mod test_v5;
 mod types;
 
 pub use errors::Error;
-pub use schedule::{first_calendar_run, next_run_after, ramped_fee, split_fee};
+pub use schedule::{first_calendar_run, next_run_after, ramped_fee, smooth, split_fee};
 pub use types::{
     Config, Job, JobParams, JobSpec, JobState, JobUpdate, Keeper, KeeperStats, PendingUpgrade,
     Schedule,
@@ -40,6 +40,7 @@ use soroban_sdk::{
     contract, contractimpl, panic_with_error, token, vec, xdr::ToXdr, Address, Bytes, BytesN,
     ContractExecutable, Env, IntoVal, Symbol, Vec,
 };
+use types::KeeperRecent;
 
 /// Function a resolver contract must expose: `should_run(job_id: u64) -> bool`.
 pub const RESOLVER_FN: &str = "should_run";
@@ -60,6 +61,9 @@ pub const MAX_ACTIVE_KEEPERS: u32 = 64;
 
 /// Upper bound for `protocol_fee_bps` and `slash_bps` (10%).
 pub const MAX_BPS: u32 = 1_000;
+
+/// 100% in basis points: a missed window's sample in `recent_miss_bps`.
+const MAX_BPS_SCALE: u64 = 10_000;
 
 /// Consecutive failures before a job pauses itself, until the admin changes it.
 pub const DEFAULT_MAX_FAILURES: u32 = 3;
@@ -370,7 +374,8 @@ impl SoroCron {
     /// protocol fee). A failed target call is still charged and recorded.
     pub fn execute(env: Env, keeper: Address, job_id: u64) -> Result<(), Error> {
         let config = storage::load_config(&env);
-        let (executor, mut keeper_info) = authorize_keeper(&env, &config, &keeper)?;
+        let (executor, info) = authorize_keeper(&env, &config, &keeper)?;
+        let mut record = KeeperRecord::load(&env, &keeper, info);
 
         let mut payout = Payout::default();
         run_job(
@@ -378,11 +383,11 @@ impl SoroCron {
             &config,
             &executor,
             &keeper,
-            &mut keeper_info,
+            &mut record,
             job_id,
             &mut payout,
         )?;
-        storage::set_keeper(&env, &keeper, &keeper_info);
+        record.save(&env, &keeper);
         settle(&env, &config, &keeper, &payout);
         Ok(())
     }
@@ -397,7 +402,8 @@ impl SoroCron {
             return Err(Error::InvalidBatchSize);
         }
         let config = storage::load_config(&env);
-        let (executor, mut keeper_info) = authorize_keeper(&env, &config, &keeper)?;
+        let (executor, info) = authorize_keeper(&env, &config, &keeper)?;
+        let mut record = KeeperRecord::load(&env, &keeper, info);
 
         let mut ran = Vec::new(&env);
         let mut payout = Payout::default();
@@ -407,14 +413,14 @@ impl SoroCron {
                 &config,
                 &executor,
                 &keeper,
-                &mut keeper_info,
+                &mut record,
                 job_id,
                 &mut payout,
             )
             .is_ok();
             ran.push_back(ok);
         }
-        storage::set_keeper(&env, &keeper, &keeper_info);
+        record.save(&env, &keeper);
         settle(&env, &config, &keeper, &payout);
         Ok(ran)
     }
@@ -811,6 +817,7 @@ impl SoroCron {
     pub fn keeper_stats(env: Env, keeper: Address) -> Option<KeeperStats> {
         let config = storage::load_config(&env);
         let info = storage::get_keeper(&env, &keeper)?;
+        let recent = storage::get_keeper_recent(&env, &keeper);
         Some(KeeperStats {
             stake: info.stake,
             executions: info.executions,
@@ -822,6 +829,8 @@ impl SoroCron {
             missed: info.missed,
             slashed: info.slashed,
             eligible: ensure_active_keeper(&config, &info).is_ok(),
+            recent_lateness: recent.lateness / 8,
+            recent_miss_bps: (recent.misses / 8) as u32,
         })
     }
 
@@ -1095,6 +1104,27 @@ struct Payout {
 
 /// Checks the registry state and keeper shared by `execute` and
 /// `execute_batch`, returning the executor and the keeper's record.
+/// The executing keeper's stored record and recent stats, loaded once per
+/// transaction and saved once at the end however many jobs it runs.
+struct KeeperRecord {
+    info: Keeper,
+    recent: KeeperRecent,
+}
+
+impl KeeperRecord {
+    fn load(env: &Env, keeper: &Address, info: Keeper) -> Self {
+        KeeperRecord {
+            info,
+            recent: storage::get_keeper_recent(env, keeper),
+        }
+    }
+
+    fn save(&self, env: &Env, keeper: &Address) {
+        storage::set_keeper(env, keeper, &self.info);
+        storage::set_keeper_recent(env, keeper, &self.recent);
+    }
+}
+
 fn authorize_keeper(
     env: &Env,
     config: &Config,
@@ -1115,7 +1145,7 @@ fn run_job(
     config: &Config,
     executor: &Address,
     keeper: &Address,
-    keeper_info: &mut Keeper,
+    record: &mut KeeperRecord,
     job_id: u64,
     payout: &mut Payout,
 ) -> Result<(), Error> {
@@ -1181,8 +1211,10 @@ fn run_job(
         .publish(env);
     }
 
-    keeper_info.executions = keeper_info.executions.saturating_add(1);
-    keeper_info.total_lateness = keeper_info.total_lateness.saturating_add(lateness);
+    record.info.executions = record.info.executions.saturating_add(1);
+    record.info.total_lateness = record.info.total_lateness.saturating_add(lateness);
+    record.recent.lateness = smooth(record.recent.lateness, lateness);
+    record.recent.misses = smooth(record.recent.misses, 0);
     if let Some(missed) = assigned {
         payout.slash_rewards += slash_missed_keeper(env, config, &missed, keeper, job_id);
     }
@@ -1222,6 +1254,9 @@ fn slash_missed_keeper(
     info.slashed += amount;
     info.missed = info.missed.saturating_add(1);
     storage::set_keeper(env, missed, &info);
+    let mut recent = storage::get_keeper_recent(env, missed);
+    recent.misses = smooth(recent.misses, MAX_BPS_SCALE);
+    storage::set_keeper_recent(env, missed, &recent);
     events::KeeperSlashed {
         keeper: missed.clone(),
         job_id,
