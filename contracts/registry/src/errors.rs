@@ -51,4 +51,10 @@ pub enum Error {
     /// The job follows another job (`after`) that hasn't run again yet, or
     /// no longer exists.
     AwaitingDependency = 32,
+    /// `apply_upgrade` or `cancel_upgrade` without a proposed upgrade.
+    NoPendingUpgrade = 33,
+    /// The proposed upgrade's delay hasn't passed yet.
+    UpgradeNotReady = 34,
+    /// `accept_job_owner` without a pending owner for the job.
+    NoPendingOwner = 35,
 }

@@ -8,7 +8,7 @@
 
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::types::{Config, DataKey, Job, JobSpec, JobState, Keeper};
+use crate::types::{Config, DataKey, Job, JobSpec, JobState, Keeper, PendingUpgrade};
 
 const DAY_IN_LEDGERS: u32 = 17_280;
 
@@ -77,6 +77,31 @@ pub fn remove_pending_admin(env: &Env) {
     env.storage().instance().remove(&DataKey::PendingAdmin);
 }
 
+pub fn get_upgrade_delay(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::UpgradeDelay)
+        .unwrap_or(0)
+}
+
+pub fn set_upgrade_delay(env: &Env, delay: u64) {
+    env.storage().instance().set(&DataKey::UpgradeDelay, &delay);
+}
+
+pub fn get_pending_upgrade(env: &Env) -> Option<PendingUpgrade> {
+    env.storage().instance().get(&DataKey::PendingUpgrade)
+}
+
+pub fn set_pending_upgrade(env: &Env, upgrade: &PendingUpgrade) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingUpgrade, upgrade);
+}
+
+pub fn remove_pending_upgrade(env: &Env) {
+    env.storage().instance().remove(&DataKey::PendingUpgrade);
+}
+
 // ---------------------------------------------------------------- jobs
 
 pub fn next_job_id(env: &Env) -> u64 {
@@ -119,6 +144,21 @@ pub fn get_job_parts(env: &Env, id: u64) -> Option<(JobSpec, JobState)> {
 pub fn remove_job(env: &Env, id: u64) {
     env.storage().persistent().remove(&DataKey::Job(id));
     env.storage().persistent().remove(&DataKey::JobState(id));
+    remove_pending_owner(env, id);
+}
+
+pub fn get_pending_owner(env: &Env, id: u64) -> Option<Address> {
+    get_persistent(env, &DataKey::PendingJobOwner(id))
+}
+
+pub fn set_pending_owner(env: &Env, id: u64, owner: &Address) {
+    set_persistent(env, &DataKey::PendingJobOwner(id), owner);
+}
+
+pub fn remove_pending_owner(env: &Env, id: u64) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::PendingJobOwner(id));
 }
 
 /// The public view of a job, assembled from its two entries.

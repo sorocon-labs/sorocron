@@ -275,6 +275,47 @@ impl Harness {
     }
 }
 
+/// A job target and resolver that calls back into the registry while it
+/// runs. `arm` picks the call; the target function `run()` and the resolver
+/// hook `should_run(job_id)` both make it. Used to check the registry stays
+/// consistent whatever a target or resolver does.
+#[contract]
+pub struct Reentrant;
+
+#[contractimpl]
+impl Reentrant {
+    pub fn arm(env: Env, registry: Address, function: Symbol, args: Vec<Val>) {
+        env.storage()
+            .instance()
+            .set(&symbol_short!("call"), &(registry, function, args));
+    }
+
+    pub fn run(env: Env) {
+        call_back(&env);
+    }
+
+    pub fn should_run(env: Env, _job_id: u64) -> bool {
+        call_back(&env);
+        true
+    }
+}
+
+fn call_back(env: &Env) {
+    let (registry, function, args): (Address, Symbol, Vec<Val>) = env
+        .storage()
+        .instance()
+        .get(&symbol_short!("call"))
+        .expect("arm() was called");
+    env.invoke_contract::<Val>(&registry, &function, args);
+}
+
+impl Harness {
+    /// Registers a `Reentrant` contract and returns its client.
+    pub fn reentrant(&self) -> ReentrantClient<'static> {
+        ReentrantClient::new(&self.env, &self.env.register(Reentrant, ()))
+    }
+}
+
 impl Default for Harness {
     fn default() -> Self {
         Self::new()

@@ -48,6 +48,12 @@ Each tick it:
    only have one transaction in flight. With `CHANNEL_SECRET_KEYS` set, each
    channel account pays for and sequences a batch while the keeper only
    signs its authorization, so N channels send N batches at once.
+5. **Fails over between RPC endpoints.** With several comma-separated
+   `STELLAR_RPC_URLS`, it probes each one every tick and uses the first that
+   answers, isn't failing ticks, and is within 10 ledgers of the
+   furthest-ahead endpoint. It goes back to the preferred endpoint after five
+   good probes in a row. Logs and metrics show only each endpoint's host, in
+   case a provider puts an API key in the URL.
 
 ### Alerts
 
@@ -84,6 +90,9 @@ poll intervals.
 | `sorocron_keeper_balance_stroops{account}` | gauge | XLM balance of the keeper and each channel |
 | `sorocron_keeper_inclusion_fee_stroops` | gauge | Current inclusion fee bid |
 | `sorocron_keeper_rpc_calls_last_sync` | gauge | RPC calls the last index sync made |
+| `sorocron_keeper_rpc_up{endpoint}` | gauge | With several endpoints: whether each answered its last probe |
+| `sorocron_keeper_rpc_active{endpoint}` | gauge | 1 for the endpoint in use, 0 for the others |
+| `sorocron_keeper_rpc_latest_ledger{endpoint}` | gauge | Latest ledger each endpoint reported |
 
 Grafana queries:
 
@@ -147,6 +156,8 @@ npm run cli -- jobs withdraw 7 2      # take 2 XLM back
 npm run cli -- jobs pause 7
 npm run cli -- jobs resume 7          # also clears its failure count
 npm run cli -- jobs cancel 7          # delete it and refund the balance
+npm run cli -- jobs transfer 7 GB...  # offer it to another account (v5 registries)
+npm run cli -- jobs accept 7          # run by that account to take it over
 ```
 
 ### Keeper stake

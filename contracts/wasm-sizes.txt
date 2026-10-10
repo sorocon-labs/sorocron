@@ -13,5 +13,5 @@ example_timelock 5135
 example_timelock_resolver 3933
 example_vesting 7497
 executor 1006
-registry 51201
+registry 57070
 ttl_guardian 2362

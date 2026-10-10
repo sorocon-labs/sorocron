@@ -56,6 +56,15 @@ repository = "https://github.com/sorocon-labs/sorocron"
 soroban-sdk = "28.0.0"
 proptest = "1.9"
 
+# Debug builds (tests, clippy, coverage): dependencies build without debug
+# info and our own crates keep only line tables, which is enough for
+# backtraces. The registry's test build drops from 1.9 GB to 0.9 GB.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

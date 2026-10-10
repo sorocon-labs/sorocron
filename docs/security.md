@@ -66,18 +66,18 @@ Both are classified non-recoverable in `soroban-env-host` (`HostError::is_recove
 
 ## Upgrades and migrations
 
-The admin can replace the registry's code with `upgrade(wasm_hash)`; storage and the contract address are kept, and an `Upgraded` event records the new hash and the previous `version()`. The test `upgrade_to_real_wasm_preserves_state` uploads the built WASM, upgrades to it and checks that jobs, keepers and config survive and keep working.
+Upgrades are timelocked. The admin announces new code with `propose_upgrade(wasm_hash)`, which emits `UpgradeProposed` with the time it becomes available, and can only install it with `apply_upgrade()` once `upgrade_delay()` seconds have passed. The delay can't be shorter than `unbonding_period + unbonding_epoch`, the longest a keeper can need to unbond and withdraw, so everyone who disagrees with an upgrade can leave before it runs: job owners can cancel or withdraw at any time, keepers can unbond and withdraw within the delay. The admin can lengthen the delay with `set_upgrade_delay` or withdraw the announcement with `cancel_upgrade`. Lengthening the epoch or the delay after an announcement pushes the pending upgrade back, and shortening them again never brings it forward, so keepers who start unbonding after an announcement always get out first. Keepers that were already unbonding under a longer epoch the admin has since shortened aren't covered. Storage and the contract address are kept, and an `Upgraded` event records the new hash and the previous `version()`. The test `upgrade_to_real_wasm_preserves_state` uploads the built WASM, upgrades to it and checks that jobs, keepers and config survive and keep working.
 
 Policy:
 
-- **The admin key must be a multisig or sit behind a timelock in production.** Upgrade authority over a contract that holds deposits is the most powerful role in the system.
+- **The admin key must still be a multisig in production.** The delay gives users time to leave, but anyone who doesn't watch for `UpgradeProposed` events could miss it, and the admin's other powers (pausing, halting targets, fees) take effect immediately.
 - Every interface change bumps `version()`. Clients check it before relying on new functions.
 - Storage layout changes need a migration plan in the upgrade's pull request: either new keys alongside old ones, or a one-off migration function that is removed in the following release. v4 changed the job layout, so v3 deployments are redeployed rather than upgraded.
 - Error codes and event fields are only ever appended.
 
 ## Known limitations
 
-- **Admin trust:** the admin can pause the registry, halt targets, change `min_stake`, set the protocol fee and slash share (each capped at 10%), connect the executor once and upgrade the code. The admin cannot move escrowed funds except through an upgrade, which is why the admin should be a multisig. Handover uses a two-step `propose_admin` / `accept_admin` flow.
+- **Admin trust:** the admin can pause the registry, halt targets, change `min_stake`, set the protocol fee and slash share (each capped at 10%), connect the executor once and announce upgrades. The admin cannot move escrowed funds except through an upgrade, and an upgrade can't run until users have had time to withdraw. Handover uses a two-step `propose_admin` / `accept_admin` flow.
 - **Rotation size:** at most 64 keepers take part in assigned windows; others can still run any job after its window.
 - **Lateness metrics** are averages over a keeper's lifetime, not a sliding window.
 

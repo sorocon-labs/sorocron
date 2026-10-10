@@ -195,6 +195,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # What `npm publish` would ship for the SDK and React hooks (#115).
+      - name: Check the npm packages
+        run: node scripts/prepare-npm.mjs
 
   docs:
     name: Documentation site

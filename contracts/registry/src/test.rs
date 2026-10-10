@@ -1689,7 +1689,7 @@ fn version_is_exposed() {
 }
 
 #[test]
-fn only_admin_can_upgrade() {
+fn only_admin_can_propose_an_upgrade() {
     let s = setup();
     let hash = BytesN::from_array(&s.env, &[7; 32]);
     let stranger = Address::generate(&s.env);
@@ -1698,10 +1698,10 @@ fn only_admin_can_upgrade() {
         address: &stranger,
         invoke: &MockAuthInvoke {
             contract: &s.cron.address,
-            fn_name: "upgrade",
+            fn_name: "propose_upgrade",
             args: (hash.clone(),).into_val(&s.env),
             sub_invokes: &[],
         },
     }]);
-    assert!(s.cron.try_upgrade(&hash).is_err());
+    assert!(s.cron.try_propose_upgrade(&hash).is_err());
 }

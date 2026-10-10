@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Symbol, Val, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Symbol, Val, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -194,6 +194,18 @@ pub struct KeeperStats {
     pub eligible: bool,
 }
 
+/// A code upgrade announced with `propose_upgrade`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingUpgrade {
+    pub wasm_hash: BytesN<32>,
+    pub proposed_at: u64,
+    /// Earliest time `apply_upgrade` installs it. Lengthening the unbonding
+    /// epoch or the upgrade delay afterwards moves it later; nothing moves
+    /// it earlier.
+    pub available_at: u64,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -210,4 +222,9 @@ pub enum DataKey {
     ActiveKeepers,
     /// Present while the admin has halted every job calling this contract.
     HaltedTarget(Address),
+    /// Delay set with `set_upgrade_delay`, in seconds.
+    UpgradeDelay,
+    PendingUpgrade,
+    /// Owner proposed with `propose_job_owner`, per job.
+    PendingJobOwner(u64),
 }
