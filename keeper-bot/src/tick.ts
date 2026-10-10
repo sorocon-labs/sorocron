@@ -12,7 +12,7 @@
  * Typed against narrow interfaces rather than the SDK client so it can be
  * tested with fakes.
  */
-import type { Prepared } from "@sorocron/sdk";
+import { isRestoreRequired, type Prepared } from "@sorocron/sdk";
 import { isSequenceError, type ChannelPool } from "./channels.js";
 import { isFeeRelated } from "./fees.js";
 import type { Logger } from "./logger.js";
@@ -47,6 +47,11 @@ export interface TickDeps {
   feeIsNative?: boolean;
   /** Base URL for transaction links in logs. */
   explorer?: string;
+  /**
+   * Restore archived state a batch needs when the restore's resource fee is
+   * at most this, in stroops. 0 or unset never restores (#111).
+   */
+  maxRestoreFee?: bigint;
 }
 
 /** What one tick did, for metrics. Every due job lands in exactly one bucket. */
@@ -62,6 +67,9 @@ export interface TickSummary {
   failed: number;
   /** Fees earned by executed jobs, in stroops (before the protocol fee). */
   earnedStroops: bigint;
+  /** Archived-state restores sent, and their resource fees in stroops. */
+  restores: number;
+  restoreFeeStroops: bigint;
 }
 
 const firstLine = (err: unknown) => (err instanceof Error ? err.message : String(err)).split("\n")[0];
@@ -77,6 +85,29 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
     unprofitable: 0,
     failed: 0,
     earnedStroops: 0n,
+    restores: 0,
+    restoreFeeStroops: 0n,
+  };
+  const link = (hash: string) => (hash && deps.explorer ? ` ${deps.explorer}/tx/${hash}` : "");
+
+  /**
+   * Simulates a batch. When a target's state was archived, restores it
+   * first if that costs no more than `maxRestoreFee`, then simulates again.
+   */
+  const prepare = async (client: BatchClient, ids: bigint[], label: string): Promise<Prepared<boolean[]>> => {
+    try {
+      return await client.prepareExecuteBatch(ids, deps.keeper);
+    } catch (err) {
+      if (!isRestoreRequired(err)) throw err;
+      const max = deps.maxRestoreFee ?? 0n;
+      if (max === 0n) throw new Error(`archived state needs a restore (~${err.fee} stroops); set MAX_RESTORE_FEE_STROOPS to allow it`);
+      if (err.fee > max) throw new Error(`archived state needs a restore (~${err.fee} stroops), above MAX_RESTORE_FEE_STROOPS (${max})`);
+      const { hash } = await err.restore();
+      summary.restores += 1;
+      summary.restoreFeeStroops += err.fee;
+      deps.log(`${label}: restored archived state for ~${err.fee} stroops${link(hash)}`);
+      return client.prepareExecuteBatch(ids, deps.keeper);
+    }
   };
 
   const batches: { id: bigint; feePerRun: bigint }[][] = [];
@@ -91,7 +122,7 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
 
         let prepared: Prepared<boolean[]>;
         try {
-          prepared = await client.prepareExecuteBatch(ids, deps.keeper);
+          prepared = await prepare(client, ids, label);
         } catch (err) {
           deps.log(`${label}: skipped (${firstLine(err)})`);
           summary.skipped += batch.length;
@@ -123,8 +154,7 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
           deps.fees.reset();
           summary.executed += runnable.length;
           summary.earnedStroops += earned;
-          const link = sent.hash && deps.explorer ? ` ${deps.explorer}/tx/${sent.hash}` : "";
-          deps.log(`executed ${runnable.map((j) => j.id).join(",")}${link}`);
+          deps.log(`executed ${runnable.map((j) => j.id).join(",")}${link(sent.hash)}`);
         } catch (err) {
           if (isFeeRelated(err)) deps.fees.escalate();
           // Another keeper may have run them first; that's expected.

@@ -179,6 +179,7 @@ async function main() {
           minProfitStroops: settings.minProfitStroops,
           feeIsNative: config.fee_token === NATIVE_TOKEN_CONTRACT_ID,
           explorer: EXPLORER,
+          maxRestoreFee: settings.maxRestoreFee,
         },
         BigInt(Math.floor(Date.now() / 1000)),
       );
@@ -337,6 +338,13 @@ function recordTick(metrics: Metrics, summary: TickSummary, durationMs: number, 
   metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "skipped" }, summary.skipped);
   metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "unprofitable" }, summary.unprofitable);
   metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "failed" }, summary.failed);
+  metrics.inc("sorocron_keeper_restores_total", "Archived-state restores sent before executing", {}, summary.restores);
+  metrics.inc(
+    "sorocron_keeper_restore_fees_stroops_total",
+    "Resource fees of archived-state restores",
+    {},
+    Number(summary.restoreFeeStroops),
+  );
   metrics.inc(
     "sorocron_keeper_fees_earned_stroops_total",
     "Fees earned from executed jobs paid in native XLM",
