@@ -1,7 +1,8 @@
 name: Release
 
 # On a `v*` tag: attach the contract WASMs to a GitHub release, publish the
-# keeper image to ghcr.io, and redeploy testnet (issue #31).
+# keeper image to ghcr.io and the SDK and React hooks to npm (#115), and
+# redeploy testnet (issue #31).
 #
 # Every Monday: check the testnet registry still exists, since Stellar resets
 # testnet from time to time, and redeploy if it's gone.
@@ -83,6 +84,46 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  npm:
+    name: npm packages
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # npm provenance: a signed link from each package to this workflow run.
+      id-token: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Require the npm token
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::Add an npm automation token with publish rights to the @sorocron scope as the NPM_TOKEN secret."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build -w @sorocron/sdk && npm run build -w @sorocron/react
+      - name: Check versions and contents
+        run: node scripts/prepare-npm.mjs --tag "$GITHUB_REF_NAME"
+      - name: Publish
+        run: |
+          for name in @sorocron/sdk @sorocron/react; do
+            version=$(npm pkg get version -w "$name" | jq -r '.[]')
+            # Re-running a release skips versions that are already out.
+            if npm view "$name@$version" version > /dev/null 2>&1; then
+              echo "$name@$version is already on npm."
+              continue
+            fi
+            npm publish -w "$name" --provenance --access public
+          done
 
   check:
     name: Is the testnet registry live?
