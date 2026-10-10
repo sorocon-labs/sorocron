@@ -6,6 +6,8 @@ Typed TypeScript client for the [SoroCron](https://github.com/sorocon-labs/soroc
 npm install @sorocron/sdk @stellar/stellar-sdk
 ```
 
+Published to npm from every release tag, with [provenance](https://docs.npmjs.com/generating-provenance-statements) linking each version to the workflow run that built it.
+
 ## Read the registry
 
 ```ts
@@ -63,6 +65,8 @@ await cron.createJob(
 |---|---|
 | `createJob`, `createJobs` | `create_job`, `create_jobs` |
 | `updateJob`, `fundJob`, `setJobActive`, `withdrawJobBalance`, `cancelJob` | job owner functions |
+| `proposeJobOwner`, `acceptJobOwner`, `pendingJobOwner` | job handover (v5 registries) |
+| `pendingUpgrade`, `upgradeDelay` | announced registry upgrades (v5 registries) |
 | `stake`, `beginUnbonding`, `withdrawStake`, `execute`, `executeBatch` | keeper functions |
 | `config`, `version`, `jobCount`, `getJob`, `getJobs`, `allJobs`, `jobsByOwner`, `getKeeper`, `isDue` | views |
 

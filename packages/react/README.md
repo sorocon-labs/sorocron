@@ -7,6 +7,8 @@ jobs, countdowns and keeper status that refresh themselves.
 npm install @sorocron/react @sorocron/sdk @stellar/stellar-sdk
 ```
 
+Released together with `@sorocron/sdk`: install the same version of both.
+
 ## Two lines
 
 ```tsx

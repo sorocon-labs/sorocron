@@ -146,6 +146,23 @@ stellar contract invoke --id $REG --source me --network testnet --send=yes -- \
   cancel_job --job_id 0
 ```
 
+### propose_job_owner / pending_job_owner / accept_job_owner
+
+New in v5, so not run against testnet yet. The owner offers the job to
+another account, which takes it over by accepting; the job keeps its id,
+balance and history. Proposing yourself withdraws the offer.
+
+```bash
+stellar contract invoke --id $REG --source me --network testnet --send=yes -- \
+  propose_job_owner --job_id 0 --new_owner GA...
+
+stellar contract invoke --id $REG --source me --network testnet -- pending_job_owner --job_id 0
+
+# Signed by the new owner:
+stellar contract invoke --id $REG --source new-owner --network testnet --send=yes -- \
+  accept_job_owner --job_id 0
+```
+
 ## Keepers
 
 ### stake
@@ -256,4 +273,29 @@ stellar contract invoke --id $REG --source me --network testnet --send=yes -- \
 # or, signed by the proposed address:
 stellar contract invoke --id $REG --source new-admin --network testnet --send=yes -- \
   accept_admin
+```
+
+### propose_upgrade / pending_upgrade / apply_upgrade / cancel_upgrade / set_upgrade_delay
+
+New in v5, so not run against testnet yet. Upgrades wait at least
+`unbonding_period + unbonding_epoch`, so keepers and owners can leave first.
+
+```bash
+# Upload the new code and announce it. Returns when it can be applied.
+HASH=$(stellar contract upload --wasm target/wasm32v1-none/release/sorocron_registry.wasm \
+  --source me --network testnet)
+stellar contract invoke --id $REG --source me --network testnet --send=yes -- \
+  propose_upgrade --wasm_hash $HASH
+
+stellar contract invoke --id $REG --source me --network testnet -- pending_upgrade
+stellar contract invoke --id $REG --source me --network testnet -- upgrade_delay
+
+# After the delay:
+stellar contract invoke --id $REG --source me --network testnet --send=yes -- apply_upgrade
+# Or withdraw it:
+stellar contract invoke --id $REG --source me --network testnet --send=yes -- cancel_upgrade
+
+# Make every future upgrade wait at least a week:
+stellar contract invoke --id $REG --source me --network testnet --send=yes -- \
+  set_upgrade_delay --upgrade_delay 604800
 ```

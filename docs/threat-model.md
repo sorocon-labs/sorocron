@@ -11,7 +11,7 @@ the structured list auditors and reviewers can check item by item.
 |---|---|---|
 | **Job owner** | Untrusted toward others | Create, fund, update, pause and cancel their own jobs; choose any target, arguments, resolver, keeper allowlist and leader job |
 | **Keeper** | Untrusted, staked | Execute due jobs; stake, unbond, withdraw; choose which jobs to run and when to submit |
-| **Admin** | Trusted (should be a multisig or timelock) | Pause the registry, halt targets, set limits, protocol fee and slashing (capped at 10%), connect the executor once, upgrade the code |
+| **Admin** | Trusted (should be a multisig) | Pause the registry, halt targets, set limits, protocol fee and slashing (capped at 10%), connect the executor once, announce upgrades that wait at least the unbonding time |
 | **Target contract** | Untrusted | Run arbitrary code when called by the executor |
 | **Resolver contract** | Untrusted | Answer `should_run`; run arbitrary code during that call |
 | **Anyone** | Untrusted | Fund any job, settle matured stakes, read everything |
@@ -62,7 +62,7 @@ never called by the registry itself, only by the executor, which owns nothing
 | T2 | Tampering | Arithmetic overflow corrupts balances or schedules | Saturating schedule math, checked fee split, `overflow-checks` in release; proptests at the `u64`/`i128` extremes | Mitigated |
 | T3 | Tampering | Escrow accounting drifts from token balances | Fee accounting invariant fuzzed with 1,000 random operation sequences per CI run | Mitigated |
 | T4 | Tampering | A keeper fakes a target failure to collect fees without doing the work | Budget and footprint errors are non-recoverable, so the whole transaction fails | Mitigated |
-| T5 | Tampering | A malicious upgrade drains escrow | Admin-only `upgrade`; policy requires a multisig or timelock admin | Trust assumption (R1) |
+| T5 | Tampering | A malicious upgrade drains escrow | Upgrades are announced with `propose_upgrade` and can't be applied before `unbonding_period + unbonding_epoch`, so owners and keepers can withdraw first; policy requires a multisig admin | Mitigated, users must watch for upgrades (R1) |
 | R1 | Repudiation | Disputes over whether a job ran or why it failed | Every run emits a `JobExecuted` receipt with outcome, fee split, lateness and result hash; config changes emit events | Mitigated |
 | I1 | Information disclosure | Job arguments are public | By design: all contract state is public. Don't put secrets in job arguments | Accepted |
 | D1 | Denial of service | A broken resolver blocks keepers | Resolvers are called with `try_invoke`; failure means "not ready" | Mitigated |
@@ -80,10 +80,10 @@ never called by the registry itself, only by the executor, which owns nothing
 
 | # | Risk | Notes |
 |---|---|---|
-| R1 | **Admin key compromise.** The admin can upgrade the registry, which could redirect escrow. | Deploy with a multisig or timelock admin and announce upgrades in advance. A built-in upgrade timelock would remove this trust; see the issue tracker. |
+| R1 | **Admin key compromise.** The admin can propose an upgrade that redirects escrow. | The upgrade timelock gives owners and keepers at least the unbonding time to withdraw, but only if they notice the `UpgradeProposed` event. Deploy with a multisig admin. |
 | R2 | **Unaudited code.** | No external audit yet. Don't use with funds you can't afford to lose. |
 | R3 | **Windows are off by default.** With `grace_period = 0` execution is first come, first served. | The admin enables windows with `set_keeper_windows`. Rotation is capped at 64 keepers. |
-| R4 | **Single-RPC keepers.** A keeper relying on one RPC provider can be starved of data. | Run keepers on different providers; the index resyncs from scratch periodically. |
+| R4 | **Single-RPC keepers.** A keeper relying on one RPC provider can be starved of data. | Give each keeper several `STELLAR_RPC_URLS` to fail over between, and run keepers on different providers; the index resyncs from scratch periodically. |
 | R5 | **Oracle-dependent resolvers** inherit their oracle's trust. | The example price and NFT resolvers ignore stale data, but can't detect a wrong fresh price. |
 | R6 | **Fee economics.** Jobs whose fee doesn't cover the network fee won't be run. | Keepers skip unprofitable batches by design. Owners should check [costs](costs.md) and use a fee ceiling for time-sensitive jobs. |
 

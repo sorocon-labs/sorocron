@@ -31,6 +31,7 @@ documents each one. The important ones:
 | `STELLAR_SECRET_KEY` | The staked keeper. Receives fees and signs executions. **Secret.** |
 | `CHANNEL_SECRET_KEYS` | Optional extra accounts that pay for and sequence transactions, so batches go out in parallel. **Secret.** |
 | `STELLAR_NETWORK`, `STELLAR_RPC_URL` | `testnet`, `mainnet` or `local`, and the RPC to use |
+| `STELLAR_RPC_URLS` | Several RPC endpoints, most preferred first; the keeper fails over between them |
 | `SOROCRON_CONTRACT_ID` | Registry address; defaults to `deployments/<network>.json` |
 | `BATCH_SIZE` | Jobs per transaction, up to 20 |
 | `FEE_PERCENTILE`, `MAX_INCLUSION_FEE` | Inclusion fee bidding |

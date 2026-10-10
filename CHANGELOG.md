@@ -2,7 +2,29 @@
 
 All notable changes to SoroCron are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Contract error codes and event fields are part of the public interface; changes to them are called out explicitly.
 
-## [0.3.0] - Unreleased
+## [Unreleased]
+
+### Added
+- **Upgrade timelock**: `upgrade` is replaced by `propose_upgrade`, `apply_upgrade` and `cancel_upgrade`. An announced upgrade can't be applied before `upgrade_delay()`, which is never shorter than `unbonding_period + unbonding_epoch`, so job owners and keepers can withdraw before new code runs. `set_upgrade_delay` lengthens it, and lengthening the epoch or the delay after an announcement pushes the pending upgrade back for good. ([#109](https://github.com/sorocon-labs/sorocron/issues/109))
+- **Job ownership transfer**: `propose_job_owner` and `accept_job_owner` hand a job to another account, keeping its id, balance and history; `sorocron jobs transfer` and `jobs accept` in the CLI. ([#110](https://github.com/sorocon-labs/sorocron/issues/110))
+- **Keeper RPC failover**: `STELLAR_RPC_URLS` takes several endpoints; the keeper probes them every tick and moves off one that stops answering, keeps failing or falls behind, and back once it recovers. ([#112](https://github.com/sorocon-labs/sorocron/issues/112))
+- **npm releases**: release tags publish `@sorocron/sdk` and `@sorocron/react` to npm with provenance, and CI checks what would be published on every pull request. Published packages export only the build. ([#115](https://github.com/sorocon-labs/sorocron/issues/115))
+- **Callback tests**: targets and resolvers that call back into the registry mid-run (execute, batch, cancel, fund, withdraw, update) are rejected and leave every balance consistent. ([#118](https://github.com/sorocon-labs/sorocron/issues/118))
+- **Dashboard tests**: the New Job form and how every job status is shown, run in CI. ([#119](https://github.com/sorocon-labs/sorocron/issues/119))
+
+### Fixed
+- The dashboard's Attention filter now includes failing jobs, which were only listed under All.
+
+### Changed
+- Debug builds compile dependencies without debug info and the workspace with line tables only: the registry's test build drops from 1.9 GB to 0.9 GB.
+
+### Interface
+- Interface version 5. New functions: `propose_upgrade`, `apply_upgrade`, `cancel_upgrade`, `set_upgrade_delay`, `pending_upgrade`, `upgrade_delay`, `propose_job_owner`, `accept_job_owner`, `pending_job_owner`. Removed: `upgrade`.
+- New errors: `NoPendingUpgrade` (33), `UpgradeNotReady` (34), `NoPendingOwner` (35).
+- New events: `UpgradeProposed`, `UpgradeCancelled`, `UpgradeDelaySet`, `JobOwnerProposed`, `JobOwnerChanged`. New type: `PendingUpgrade`.
+- Storage: three new keys; every existing entry keeps its layout.
+
+## [0.3.0] - 2026-10-07
 
 ### Added
 - **`update_job`**: owners change a job's function, args, interval, fee, `max_runs`, `end_at` and resolver; balance and `next_run` are kept. ([#10](https://github.com/sorocon-labs/sorocron/issues/10))

@@ -31,7 +31,7 @@ SoroCron replaces those servers with an open network:
 | 🩺 **Failure handling** | Failed target calls are charged and counted; jobs pause after repeated failures; the admin can halt one target without pausing the registry |
 | ⏸️ **Owner controls** | Fund, update, pause, resume or cancel jobs; refunds always available |
 | 📦 **Batching** | Register up to 20 jobs with one transfer; keepers run up to 20 due jobs per transaction, skipping failures |
-| 🚨 **Safe administration** | Emergency pause that never blocks exits; two-step admin handover; versioned, admin-gated upgrades |
+| 🚨 **Safe administration** | Emergency pause that never blocks exits; two-step admin handover; upgrades announced on-chain and delayed until keepers can unbond and leave |
 | 🤖 **Keepers in TypeScript and Rust** | Event-indexed job tracking, channel accounts, fee bidding, webhook alerts and Prometheus metrics; Docker, systemd, Kubernetes and Helm ([guide](docs/guides/keeper-deployment.md)) |
 | ⌨️ **CLI** | Create and manage jobs, stake and check keeper status from the terminal ([`keeper-bot`](keeper-bot/README.md)) |
 | 🖥️ **Web dashboard** | Browse jobs, schedule and manage your own with Freighter, stake as a keeper ([`app/`](app)) |
@@ -176,6 +176,7 @@ A `stellar contract invoke` example for every registry function is in [docs/cli.
 | `set_job_active(job_id, active)` | job owner | Pause or resume a job |
 | `withdraw_job_balance(job_id, amount) -> i128` | job owner | Withdraw part of a job's balance without cancelling it |
 | `cancel_job(job_id) -> i128` | job owner | Delete the job and refund the balance |
+| `propose_job_owner(job_id, new_owner)` / `accept_job_owner(job_id)` | job owner / proposed owner | Two-step handover of a job, keeping its id, balance and history |
 | `execute(keeper, job_id)` | staked keeper | Run a due job and collect its fee |
 | `execute_batch(keeper, job_ids) -> Vec<bool>` | staked keeper | Run every due job in the list, skip the rest, collect all fees in one transfer |
 | `stake(keeper, amount) -> i128` | anyone | Become a keeper / add stake |
@@ -187,8 +188,10 @@ A `stellar contract invoke` example for every registry function is in [docs/cli.
 | `set_min_stake`, `set_min_interval`, `set_max_args`, `set_max_failures`, `set_unbonding_epoch` | admin | Keeper and job limits |
 | `set_keeper_windows(grace_period, slash_bps)` | admin | Rotating assigned windows and the slash for missing one (at most 10%) |
 | `set_protocol_fee(bps, treasury)` | admin | Share of each fee sent to a treasury (at most 10%) |
-| `upgrade(wasm_hash)` | admin | Replace the registry code, keeping storage and address |
-| `is_due`, `current_fee`, `assigned_keeper`, `get_job`, `get_job_state`, `get_jobs(start, limit)`, `jobs_by_owner`, `job_count`, `get_keeper`, `keeper_stats`, `active_keepers`, `is_target_halted`, `config`, `pending_admin`, `version` | anyone | Read-only views |
+| `propose_upgrade(wasm_hash) -> u64` / `cancel_upgrade()` | admin | Announce new registry code, or withdraw the announcement |
+| `apply_upgrade()` | admin | Install the announced code once `upgrade_delay()` has passed, keeping storage and address |
+| `set_upgrade_delay(seconds)` | admin | Lengthen the wait; never shorter than `unbonding_period + unbonding_epoch` |
+| `is_due`, `current_fee`, `assigned_keeper`, `get_job`, `get_job_state`, `get_jobs(start, limit)`, `jobs_by_owner`, `job_count`, `get_keeper`, `keeper_stats`, `active_keepers`, `is_target_halted`, `config`, `pending_admin`, `pending_job_owner`, `pending_upgrade`, `upgrade_delay`, `version` | anyone | Read-only views |
 
 `JobParams`: `target`, `function`, `args`, `schedule` (`Interval`, `Daily(hour, minute)` or `Weekly(weekday, hour, minute)`, UTC), `interval` (seconds; `0` for calendar schedules), `start_at` (unix time, `0` = now), `fee_per_run`, `max_fee_per_run` (`0` = flat fee), `max_runs` (`0` = unlimited), `end_at` (unix time, `0` = never), `resolver`, `after` (a job to follow) and `keepers` (an allowlist), the last three optional.
 
