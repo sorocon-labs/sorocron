@@ -12,10 +12,11 @@
  * Typed against narrow interfaces rather than the SDK client so it can be
  * tested with fakes.
  */
-import { isRestoreRequired, type Prepared } from "@sorocron/sdk";
+import { SoroCronError, isRestoreRequired, isUnexpectedAuth, type Prepared } from "@sorocron/sdk";
 import { isSequenceError, type ChannelPool } from "./channels.js";
 import { isFeeRelated } from "./fees.js";
 import type { Logger } from "./logger.js";
+import type { Quarantine } from "./quarantine.js";
 
 export interface BatchClient {
   inclusionFee?: number;
@@ -52,6 +53,14 @@ export interface TickDeps {
    * at most this, in stroops. 0 or unset never restores (#111).
    */
   maxRestoreFee?: bigint;
+  /**
+   * When jobs pay in a token other than XLM, the profit check can't compare
+   * fees with the network cost, so batches costing more than this per job,
+   * in stroops, aren't sent. 0 or unset sends any batch.
+   */
+  maxCostPerJob?: bigint;
+  /** Jobs set aside after failing on their own; see quarantine.ts. */
+  quarantine?: Quarantine;
 }
 
 /** What one tick did, for metrics. Every due job lands in exactly one bucket. */
@@ -70,23 +79,44 @@ export interface TickSummary {
   /** Archived-state restores sent, and their resource fees in stroops. */
   restores: number;
   restoreFeeStroops: bigint;
+  /** Due jobs set aside this tick or still sitting out (counted in `skipped` too). */
+  quarantined: number;
+}
+
+/** A failure that belongs to one job in the batch, not to the registry or network. */
+class JobProblem extends Error {}
+
+/**
+ * Whether a failed batch should be split to find the job causing it:
+ * simulation failures (a job exhausting the budget), a job asking for the
+ * keeper's authorization, or a restore the keeper won't pay for. Registry
+ * errors (paused, keeper not staked) and network errors affect every job,
+ * so splitting wouldn't help.
+ */
+function isJobSpecific(err: unknown): boolean {
+  if (err instanceof SoroCronError) return false;
+  if (err instanceof JobProblem || isUnexpectedAuth(err)) return true;
+  return /simulation failed/i.test(err instanceof Error ? err.message : String(err));
 }
 
 const firstLine = (err: unknown) => (err instanceof Error ? err.message : String(err)).split("\n")[0];
 
 export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
   await deps.index.sync();
-  const due = deps.index.due(now);
+  deps.quarantine?.next();
+  const allDue = deps.index.due(now);
+  const due = allDue.filter((j) => !deps.quarantine?.has(j.id));
   const summary: TickSummary = {
-    due: due.length,
+    due: allDue.length,
     batches: 0,
     executed: 0,
-    skipped: 0,
+    skipped: allDue.length - due.length,
     unprofitable: 0,
     failed: 0,
     earnedStroops: 0n,
     restores: 0,
     restoreFeeStroops: 0n,
+    quarantined: allDue.length - due.length,
   };
   const link = (hash: string) => (hash && deps.explorer ? ` ${deps.explorer}/tx/${hash}` : "");
 
@@ -100,8 +130,8 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
     } catch (err) {
       if (!isRestoreRequired(err)) throw err;
       const max = deps.maxRestoreFee ?? 0n;
-      if (max === 0n) throw new Error(`archived state needs a restore (~${err.fee} stroops); set MAX_RESTORE_FEE_STROOPS to allow it`);
-      if (err.fee > max) throw new Error(`archived state needs a restore (~${err.fee} stroops), above MAX_RESTORE_FEE_STROOPS (${max})`);
+      if (max === 0n) throw new JobProblem(`archived state needs a restore (~${err.fee} stroops); set MAX_RESTORE_FEE_STROOPS to allow it`);
+      if (err.fee > max) throw new JobProblem(`archived state needs a restore (~${err.fee} stroops), above MAX_RESTORE_FEE_STROOPS (${max})`);
       const { hash } = await err.restore();
       summary.restores += 1;
       summary.restoreFeeStroops += err.fee;
@@ -113,56 +143,75 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
   const batches: { id: bigint; feePerRun: bigint }[][] = [];
   for (let i = 0; i < due.length; i += deps.batchSize) batches.push(due.slice(i, i + deps.batchSize));
 
-  await Promise.all(
-    batches.map((batch) =>
-      deps.channels.run(async (client) => {
-        const ids = batch.map((j) => j.id);
-        const label = `jobs ${ids.join(",")}`;
-        client.inclusionFee = deps.fees.current();
+  /**
+   * Simulates and sends one batch. A batch that fails because of one of its
+   * jobs is split in half until that job is alone, so it can't hold up the
+   * others; the job is then quarantined.
+   */
+  const runBatch = async (client: BatchClient, batch: { id: bigint; feePerRun: bigint }[]): Promise<void> => {
+    const ids = batch.map((j) => j.id);
+    const label = `jobs ${ids.join(",")}`;
+    client.inclusionFee = deps.fees.current();
 
-        let prepared: Prepared<boolean[]>;
-        try {
-          prepared = await prepare(client, ids, label);
-        } catch (err) {
-          deps.log(`${label}: skipped (${firstLine(err)})`);
-          summary.skipped += batch.length;
-          return;
-        }
-        const runnable = batch.filter((_, i) => prepared.result[i]);
-        summary.skipped += batch.length - runnable.length;
-        if (runnable.length === 0) return;
+    let prepared: Prepared<boolean[]>;
+    try {
+      prepared = await prepare(client, ids, label);
+    } catch (err) {
+      if (isJobSpecific(err) && batch.length > 1) {
+        const half = Math.ceil(batch.length / 2);
+        await runBatch(client, batch.slice(0, half));
+        await runBatch(client, batch.slice(half));
+        return;
+      }
+      if (isJobSpecific(err) && deps.quarantine) {
+        deps.quarantine.add(batch[0].id);
+        summary.quarantined += 1;
+        deps.log(`job ${batch[0].id}: set aside (${firstLine(err)})`);
+      } else {
+        deps.log(`${label}: skipped (${firstLine(err)})`);
+      }
+      summary.skipped += batch.length;
+      return;
+    }
+    const runnable = batch.filter((_, i) => prepared.result[i]);
+    summary.skipped += batch.length - runnable.length;
+    if (runnable.length === 0) return;
 
-        const earned = runnable.reduce((sum, j) => sum + j.feePerRun, 0n);
-        if (deps.feeIsNative) {
-          const cost = prepared.resourceFee + BigInt(client.inclusionFee ?? 0);
-          if (earned - cost < (deps.minProfitStroops ?? 0n)) {
-            deps.log(`${label}: unprofitable (earns ${earned}, costs ~${cost} stroops)`);
-            summary.unprofitable += runnable.length;
-            return;
-          }
-        }
+    const earned = runnable.reduce((sum, j) => sum + j.feePerRun, 0n);
+    const cost = prepared.resourceFee + BigInt(client.inclusionFee ?? 0);
+    if (deps.feeIsNative) {
+      if (earned - cost < (deps.minProfitStroops ?? 0n)) {
+        deps.log(`${label}: unprofitable (earns ${earned}, costs ~${cost} stroops)`);
+        summary.unprofitable += runnable.length;
+        return;
+      }
+    } else if (deps.maxCostPerJob && cost > deps.maxCostPerJob * BigInt(runnable.length)) {
+      deps.log(`${label}: too costly (~${cost} stroops for ${runnable.length} job(s), above MAX_COST_PER_JOB_STROOPS)`);
+      summary.unprofitable += runnable.length;
+      return;
+    }
 
-        summary.batches += 1;
-        try {
-          // A stale sequence number (the account was used elsewhere) gets one
-          // fresh attempt, rebuilt and re-simulated.
-          const sent = await prepared
-            .send()
-            .catch(async (err) =>
-              isSequenceError(err) ? (await client.prepareExecuteBatch(ids, deps.keeper)).send() : Promise.reject(err),
-            );
-          deps.fees.reset();
-          summary.executed += runnable.length;
-          summary.earnedStroops += earned;
-          deps.log(`executed ${runnable.map((j) => j.id).join(",")}${link(sent.hash)}`);
-        } catch (err) {
-          if (isFeeRelated(err)) deps.fees.escalate();
-          // Another keeper may have run them first; that's expected.
-          deps.log(`${label}: send failed (${firstLine(err)})`);
-          summary.failed += runnable.length;
-        }
-      }),
-    ),
-  );
+    summary.batches += 1;
+    try {
+      // A stale sequence number (the account was used elsewhere) gets one
+      // fresh attempt, rebuilt and re-simulated.
+      const sent = await prepared
+        .send()
+        .catch(async (err) =>
+          isSequenceError(err) ? (await client.prepareExecuteBatch(ids, deps.keeper)).send() : Promise.reject(err),
+        );
+      deps.fees.reset();
+      summary.executed += runnable.length;
+      summary.earnedStroops += earned;
+      deps.log(`executed ${runnable.map((j) => j.id).join(",")}${link(sent.hash)}`);
+    } catch (err) {
+      if (isFeeRelated(err)) deps.fees.escalate();
+      // Another keeper may have run them first; that's expected.
+      deps.log(`${label}: send failed (${firstLine(err)})`);
+      summary.failed += runnable.length;
+    }
+  };
+
+  await Promise.all(batches.map((batch) => deps.channels.run((client) => runBatch(client, batch))));
   return summary;
 }

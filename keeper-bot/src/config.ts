@@ -210,8 +210,13 @@ export const settings = {
   alertWebhookUrl: process.env.ALERT_WEBHOOK_URL ?? "",
   alertFormat: (process.env.ALERT_FORMAT ?? "generic") as "discord" | "slack" | "generic",
   alertCooldownMs: num("ALERT_COOLDOWN_MS", 3_600_000),
+  /**
+   * When jobs pay in a token other than XLM, skip batches whose network cost
+   * per job is above this, in stroops (default 1 XLM). 0 sends any batch.
+   */
+  maxCostPerJob: BigInt(num("MAX_COST_PER_JOB_STROOPS", 10_000_000)),
   /** Restore archived state for jobs when the restore's resource fee is at most this. 0 turns restores off. */
   maxRestoreFee: BigInt(num("MAX_RESTORE_FEE_STROOPS", 0)),
-  /** Stake to hold: the keeper stakes back up to this after slashing. 0 turns top-ups off. */
+  /** Stake to hold: the keeper stakes up to this whenever it holds less. 0 turns top-ups off. */
   topUpStakeTo: XLM(num("TOPUP_STAKE_TO_XLM", 0)),
 };

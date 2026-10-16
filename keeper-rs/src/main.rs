@@ -18,6 +18,7 @@ mod metrics;
 mod registry;
 mod tx;
 
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -45,14 +46,37 @@ struct TickSummary {
     failed: u64,
     /// Fees earned by executed jobs, in stroops.
     earned: i128,
+    /// Due jobs set aside after stopping their batch (counted in `skipped` too).
+    quarantined: u64,
+}
+
+/// Jobs set aside for a while after stopping their batch on their own (a
+/// budget-exhausting target, a request for the keeper's authorization), so
+/// one bad job can't block every batch it lands in.
+#[derive(Default)]
+struct Quarantine {
+    until: HashMap<u64, u64>,
+    tick: u64,
+}
+
+impl Quarantine {
+    const TICKS: u64 = 30;
+
+    fn next(&mut self) {
+        self.tick += 1;
+        let tick = self.tick;
+        self.until.retain(|_, until| *until > tick);
+    }
 }
 
 async fn tick(
     registry: &Registry,
     batch_size: usize,
     fee_is_native: bool,
+    quarantine: &mut Quarantine,
 ) -> Result<TickSummary, tx::Error> {
     let mut summary = TickSummary::default();
+    quarantine.next();
     let count = registry.job_count().await?;
     let mut due = Vec::new();
     for job_id in 0..count {
@@ -62,11 +86,28 @@ async fn tick(
         }
     }
     summary.due = due.len() as u64;
+    let waiting = due.len();
+    due.retain(|id| !quarantine.until.contains_key(id));
+    summary.quarantined = (waiting - due.len()) as u64;
+    summary.skipped = summary.quarantined;
 
-    for batch in batches(&due, batch_size) {
+    let mut queue: VecDeque<Vec<u64>> = batches(&due, batch_size).into();
+    while let Some(batch) = queue.pop_front() {
         let label = format!("jobs {}", join(&batch));
         let size = batch.len() as u64;
         match registry.execute_batch(&batch, fee_is_native).await {
+            // Find the job: retry the batch's jobs one by one.
+            Ok(BatchOutcome::JobProblem(_)) if batch.len() > 1 => {
+                queue.extend(batch.iter().map(|id| vec![*id]));
+            }
+            Ok(BatchOutcome::JobProblem(reason)) => {
+                quarantine
+                    .until
+                    .insert(batch[0], quarantine.tick + Quarantine::TICKS);
+                summary.quarantined += 1;
+                summary.skipped += 1;
+                log(format!("job {}: set aside ({reason})", batch[0]));
+            }
             Ok(BatchOutcome::Executed { ran, earned, hash }) => {
                 summary.batches += 1;
                 summary.executed += ran.len() as u64;
@@ -125,6 +166,11 @@ fn record(metrics: &Metrics, s: &TickSummary, duration: Duration, inclusion_fee:
         "sorocron_keeper_jobs_due",
         "Jobs that looked due in the last tick",
         s.due as f64,
+    );
+    metrics.set(
+        "sorocron_keeper_jobs_quarantined",
+        "Due jobs set aside after failing on their own",
+        s.quarantined as f64,
     );
     metrics.inc(
         "sorocron_keeper_batches_total",
@@ -221,9 +267,10 @@ async fn main() {
         }
     ));
 
+    let mut quarantine = Quarantine::default();
     loop {
         let started = Instant::now();
-        match tick(&registry, batch_size, fee_is_native).await {
+        match tick(&registry, batch_size, fee_is_native, &mut quarantine).await {
             Ok(s) => {
                 record(&metrics, &s, started.elapsed(), inclusion_fee);
                 metrics.record_success(metrics::now_ms());

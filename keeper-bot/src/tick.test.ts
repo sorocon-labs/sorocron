@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { RestoreRequiredError, type Prepared } from "@sorocron/sdk";
+import { RestoreRequiredError, SoroCronError, UnexpectedAuthError, type Prepared } from "@sorocron/sdk";
+import { Quarantine } from "./quarantine.js";
 import { ChannelPool } from "./channels.js";
 import { tick, type BatchClient, type DueSource, type FeeBidder, type TickDeps } from "./tick.js";
 
@@ -211,6 +212,97 @@ describe("tick", () => {
       const summary = await tick(d, 0n);
       expect(summary).toMatchObject({ skipped: 1, executed: 0, restores: 0 });
       expect(d.lines.join(" | ")).toMatch(/Restore transaction failed/);
+    });
+  });
+
+  describe("one bad job", () => {
+    const BUDGET = "Transaction simulation failed: HostError: Error(Budget, ExceededLimit)";
+
+    /** A channel whose simulation fails as a whole whenever `bad` is in the batch. */
+    function poisoned(bad: bigint, error: () => Error, calls: bigint[][] = []): BatchClient {
+      const inner = channel(() => true);
+      return {
+        async prepareExecuteBatch(ids, keeper) {
+          calls.push(ids);
+          if (ids.includes(bad)) throw error();
+          return inner.prepareExecuteBatch(ids, keeper);
+        },
+      };
+    }
+
+    it("isolates a job that exhausts the budget, runs the rest and sets it aside", async () => {
+      const calls: bigint[][] = [];
+      const quarantine = new Quarantine(30);
+      const d = deps({
+        index: index(due(1, 2, 3, 4)),
+        channels: new ChannelPool([poisoned(3n, () => new Error(BUDGET), calls)]),
+        batchSize: 4,
+        quarantine,
+      });
+      const first = await tick(d, 0n);
+      expect(first).toMatchObject({ due: 4, executed: 3, skipped: 1, quarantined: 1 });
+      expect(quarantine.has(3n)).toBe(true);
+
+      // Next tick the bad job isn't simulated at all.
+      calls.length = 0;
+      const second = await tick(d, 0n);
+      expect(calls.flat()).not.toContain(3n);
+      expect(second).toMatchObject({ executed: 3, skipped: 1, quarantined: 1 });
+    });
+
+    it("never sends a job that asks for the keeper's authorization", async () => {
+      const quarantine = new Quarantine(30);
+      const sent: bigint[][] = [];
+      const inner = channel(() => true);
+      const client: BatchClient = {
+        async prepareExecuteBatch(ids, keeper) {
+          if (ids.includes(2n)) throw new UnexpectedAuthError("transfer on CTOKEN inside the execute_batch call");
+          const prepared = await inner.prepareExecuteBatch(ids, keeper);
+          return { ...prepared, send: async () => (sent.push(ids), prepared.send()) };
+        },
+      };
+      const d = deps({ index: index(due(1, 2, 3)), channels: new ChannelPool([client]), batchSize: 3, quarantine });
+      const summary = await tick(d, 0n);
+      expect(sent.flat()).not.toContain(2n);
+      expect(summary).toMatchObject({ executed: 2, quarantined: 1 });
+      expect(d.lines.join(" | ")).toMatch(/job 2: set aside \(Refusing to sign/);
+    });
+
+    it("doesn't split or quarantine on registry-wide errors", async () => {
+      const calls: bigint[][] = [];
+      const quarantine = new Quarantine(30);
+      const client: BatchClient = {
+        async prepareExecuteBatch(ids) {
+          calls.push(ids);
+          throw new SoroCronError(1, "Paused", "The registry is paused by its admin.");
+        },
+      };
+      const d = deps({ index: index(due(1, 2, 3, 4)), channels: new ChannelPool([client]), batchSize: 4, quarantine });
+      const summary = await tick(d, 0n);
+      expect(calls).toHaveLength(1);
+      expect(summary).toMatchObject({ skipped: 4, quarantined: 0 });
+      expect(quarantine.size).toBe(0);
+    });
+
+    it("caps the network cost per job when fees aren't paid in XLM", async () => {
+      const d = deps({
+        index: index(due(1, 2)),
+        channels: new ChannelPool([channel(() => true, { resourceFee: 50_000_000n })]),
+        feeIsNative: false,
+        maxCostPerJob: 10_000_000n,
+      });
+      const summary = await tick(d, 0n);
+      expect(summary).toMatchObject({ unprofitable: 2, executed: 0 });
+      expect(d.lines[0]).toMatch(/too costly/);
+    });
+
+    it("lets a quarantined job try again later", () => {
+      const q = new Quarantine(2);
+      q.add(7n);
+      q.next();
+      expect(q.has(7n)).toBe(true);
+      q.next();
+      expect(q.has(7n)).toBe(false);
     });
   });
 });

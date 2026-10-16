@@ -53,7 +53,17 @@ Each tick it:
    `MAX_RESTORE_FEE_STROOPS` set, the keeper sends the restore when its
    resource fee is within that limit and runs the batch in the same tick;
    otherwise it logs what the restore would cost and skips the batch.
-6. **Fails over between RPC endpoints.** With several comma-separated
+6. **Signs only the registry call.** Before signing, the keeper checks that
+   the transaction authorizes nothing but `registry.execute_batch`. A job's
+   target that asks for the keeper's own authorization (to move its XLM,
+   say) is refused, and the job is set aside.
+7. **Isolates bad jobs.** A batch that fails as a whole because of one job
+   (a target exhausting the compute budget, a request for the keeper's
+   authorization, a restore over the limit) is split until that job is
+   alone; the others run and the job sits out 30 ticks. When jobs pay in a
+   token other than XLM, batches costing more than
+   `MAX_COST_PER_JOB_STROOPS` per job aren't sent.
+8. **Fails over between RPC endpoints.** With several comma-separated
    `STELLAR_RPC_URLS`, it probes each one every tick and uses the first that
    answers, isn't failing ticks, and is within 10 ledgers of the
    furthest-ahead endpoint. It goes back to the preferred endpoint after five
@@ -68,8 +78,8 @@ told when:
 | Alert | When |
 |---|---|
 | `low_balance` | The keeper or a channel account drops below `MIN_BALANCE_XLM` |
-| `low_stake` | Stake is within 10% of the registry minimum, so one slash could disqualify the keeper |
-| `keeper_ineligible` | The keeper can no longer execute (slashed below the minimum, or unbonding) |
+| `low_stake` | Stake is within 10% of the registry minimum, so raising the minimum could disqualify the keeper |
+| `keeper_ineligible` | The keeper can no longer execute (below the minimum, or unbonding) |
 | `rpc_down` | Three ticks in a row failed |
 | `runs_failing` | Every send failed for three ticks in a row |
 
@@ -95,6 +105,7 @@ poll intervals.
 | `sorocron_keeper_balance_stroops{account}` | gauge | XLM balance of the keeper and each channel |
 | `sorocron_keeper_inclusion_fee_stroops` | gauge | Current inclusion fee bid |
 | `sorocron_keeper_rpc_calls_last_sync` | gauge | RPC calls the last index sync made |
+| `sorocron_keeper_jobs_quarantined` | gauge | Due jobs set aside after failing on their own |
 | `sorocron_keeper_restores_total` | counter | Archived-state restores sent before executing |
 | `sorocron_keeper_restore_fees_stroops_total` | counter | Resource fees of those restores |
 | `sorocron_keeper_rpc_up{endpoint}` | gauge | With several endpoints: whether each answered its last probe |
@@ -170,7 +181,7 @@ npm run cli -- jobs accept 7          # run by that account to take it over
 ### Keeper stake
 
 ```bash
-npm run cli -- keeper status          # stake, eligibility, lateness, misses, slashing
+npm run cli -- keeper status          # stake, eligibility, lateness, missed windows
 npm run cli -- keeper status GABC...  # any keeper
 npm run cli -- keeper stake 100       # become a keeper or add stake
 npm run cli -- keeper topup           # stake back up to the registry minimum
@@ -183,8 +194,8 @@ npm run cli -- keeper settle GA... GB...  # pay out every listed keeper whose un
 `keeper topup` stakes only what's missing and does nothing when the keeper
 already holds the target, so it's safe to run from cron. `--dry-run` shows
 what it would stake. To have the keeper node do it instead, set
-`TOPUP_STAKE_TO_XLM`: each tick it stakes back up to that amount if slashing
-took stake away.
+`TOPUP_STAKE_TO_XLM`: each tick it stakes up to that amount whenever the
+keeper holds less, for example on first start.
 
 ### Registry
 

@@ -9,6 +9,7 @@ export {
   type ErrorName,
 } from "./errors.js";
 export { arg, parseArg, ttlGuardianArgs, LEDGERS_PER_DAY, type ArgType } from "./args.js";
+export { UnexpectedAuthError, checkKeeperAuth, isUnexpectedAuth } from "./auth.js";
 export {
   jobStatus,
   runsRemaining,

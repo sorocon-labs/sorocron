@@ -5,8 +5,10 @@
 use sha2::{Digest, Sha256};
 use stellar_rpc_client::{Client, SimulateTransactionResponse};
 use stellar_xdr::{
-    Asset, ContractIdPreimage, Hash, HashIdPreimage, HashIdPreimageContractId, Limits, ScAddress,
-    ScVal, Transaction, TransactionEnvelope, TransactionV1Envelope, VecM, WriteXdr,
+    Asset, ContractId, ContractIdPreimage, Hash, HashIdPreimage, HashIdPreimageContractId, Limits,
+    ScAddress, ScVal, SorobanAuthorizationEntry, SorobanAuthorizedFunction,
+    SorobanAuthorizedInvocation, Transaction, TransactionEnvelope, TransactionV1Envelope, VecM,
+    WriteXdr,
 };
 
 use crate::config::{address, Config};
@@ -78,12 +80,70 @@ pub enum BatchOutcome {
     Simulated(Vec<u64>),
     /// Nothing in the batch would run, or simulation failed; the reason.
     Skipped(String),
-    /// The runnable jobs earn less than the transaction costs.
+    /// The runnable jobs earn less than the transaction costs, or (when fees
+    /// aren't in XLM) cost more than `MAX_COST_PER_JOB_STROOPS` each.
     Unprofitable {
         ran: Vec<u64>,
         earned: i128,
         cost: i128,
     },
+    /// One of the jobs stops the batch: the simulation failed as a whole (a
+    /// job exhausting the budget, say), or a job asked for the keeper's
+    /// authorization. The keeper retries the jobs one by one to find it.
+    JobProblem(String),
+}
+
+/// Refuses any authorization beyond `registry.function(...)` itself. A job's
+/// target can ask for the keeper's own authorization (a transfer of its XLM,
+/// say), and simulation records that under the keeper's signature; the
+/// registry can't stop it, so the signer has to look.
+pub fn check_auth(
+    entries: &[SorobanAuthorizationEntry],
+    registry: [u8; 32],
+    function: &str,
+) -> Result<(), String> {
+    for entry in entries {
+        let root = &entry.root_invocation;
+        let expected = match &root.function {
+            SorobanAuthorizedFunction::ContractFn(call) => {
+                call.contract_address == ScAddress::Contract(ContractId(Hash(registry)))
+                    && call.function_name.0.to_utf8_string_lossy() == function
+            }
+            _ => false,
+        };
+        if !expected {
+            return Err(format!(
+                "refusing to sign: the call would also authorize {}",
+                describe(root)
+            ));
+        }
+        if let Some(inner) = root.sub_invocations.first() {
+            return Err(format!(
+                "refusing to sign: the call would also authorize {} inside {function}",
+                describe(inner)
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn describe(invocation: &SorobanAuthorizedInvocation) -> String {
+    match &invocation.function {
+        SorobanAuthorizedFunction::ContractFn(call) => {
+            let contract = match &call.contract_address {
+                ScAddress::Contract(ContractId(Hash(id))) => stellar_strkey::Contract(*id)
+                    .to_string()
+                    .as_str()
+                    .to_owned(),
+                other => format!("{other:?}"),
+            };
+            format!(
+                "{} on {contract}",
+                call.function_name.0.to_utf8_string_lossy()
+            )
+        }
+        _ => "a contract deployment".into(),
+    }
 }
 
 /// Splits due jobs into batches of at most `size` (the registry allows 20).
@@ -251,8 +311,20 @@ impl Registry {
         let args = vec![tx::account_address(&self.config.keeper), ids];
         let (unsigned, sim, value) = match self.simulate("execute_batch", args).await? {
             Ok(simulated) => simulated,
-            Err(reason) => return Ok(BatchOutcome::Skipped(reason)),
+            // Registry errors (paused, not staked) apply to every job; any
+            // other failure comes from something one of the jobs does.
+            Err(reason) if reason.contains('#') => return Ok(BatchOutcome::Skipped(reason)),
+            Err(reason) => return Ok(BatchOutcome::JobProblem(reason)),
         };
+        let auth: Vec<SorobanAuthorizationEntry> = sim
+            .results()?
+            .into_iter()
+            .next()
+            .map(|r| r.auth)
+            .unwrap_or_default();
+        if let Err(reason) = check_auth(&auth, self.config.registry, "execute_batch") {
+            return Ok(BatchOutcome::JobProblem(reason));
+        }
         let ran: Vec<u64> = job_ids
             .iter()
             .zip(ran_flags(&value, job_ids.len()))
@@ -267,7 +339,10 @@ impl Registry {
             earned += self.current_fee(*id).await?;
         }
         let cost = sim.min_resource_fee as i128 + self.config.inclusion_fee as i128;
-        if fee_is_native && !profitable(earned, cost, self.config.min_profit) {
+        let too_costly = !fee_is_native
+            && self.config.max_cost_per_job > 0
+            && cost > self.config.max_cost_per_job * ran.len() as i128;
+        if too_costly || (fee_is_native && !profitable(earned, cost, self.config.min_profit)) {
             return Ok(BatchOutcome::Unprofitable { ran, earned, cost });
         }
         if self.config.dry_run {
@@ -376,6 +451,61 @@ mod tests {
         };
         assert_eq!(i128_of(&ScVal::I128(parts)), Some(2_500_000));
         assert_eq!(i128_of(&ScVal::Void), None);
+    }
+
+    fn auth_entry(
+        contract: [u8; 32],
+        function: &str,
+        nested: Vec<SorobanAuthorizedInvocation>,
+    ) -> SorobanAuthorizationEntry {
+        let invocation = |contract: [u8; 32],
+                          function: &str,
+                          nested: Vec<SorobanAuthorizedInvocation>| {
+            SorobanAuthorizedInvocation {
+                function: SorobanAuthorizedFunction::ContractFn(stellar_xdr::InvokeContractArgs {
+                    contract_address: ScAddress::Contract(ContractId(Hash(contract))),
+                    function_name: stellar_xdr::ScSymbol(function.try_into().unwrap()),
+                    args: VecM::default(),
+                }),
+                sub_invocations: nested.try_into().unwrap(),
+            }
+        };
+        SorobanAuthorizationEntry {
+            credentials: stellar_xdr::SorobanCredentials::SourceAccount,
+            root_invocation: invocation(contract, function, nested),
+        }
+    }
+
+    #[test]
+    fn signs_only_the_registry_call() {
+        let registry = [1u8; 32];
+        let token = [2u8; 32];
+        let ok = auth_entry(registry, "execute_batch", vec![]);
+        assert!(check_auth(std::slice::from_ref(&ok), registry, "execute_batch").is_ok());
+        assert!(check_auth(&[], registry, "execute_batch").is_ok());
+
+        // A job's target asking to move the keeper's tokens.
+        let theft = auth_entry(
+            registry,
+            "execute_batch",
+            vec![auth_entry(token, "transfer", vec![]).root_invocation],
+        );
+        let err = check_auth(&[theft], registry, "execute_batch").unwrap_err();
+        assert!(err.contains("transfer on C"), "{err}");
+
+        // Anything rooted elsewhere, or another registry function.
+        assert!(check_auth(
+            &[ok, auth_entry(token, "transfer", vec![])],
+            registry,
+            "execute_batch"
+        )
+        .is_err());
+        assert!(check_auth(
+            &[auth_entry(registry, "cancel_job", vec![])],
+            registry,
+            "execute_batch"
+        )
+        .is_err());
     }
 
     #[test]
