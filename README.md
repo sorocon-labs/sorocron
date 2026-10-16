@@ -118,6 +118,8 @@ npm run keeper
 # Manage jobs from the terminal
 npm run cli -- jobs list
 npm run cli -- jobs create --target C... --function increment --arg u32:1 --every 1h --fee 0.1 --runs 24
+npm run cli -- jobs watch 0            # follow a job's runs live
+npm run cli -- --json jobs list        # JSON for scripts
 ```
 
 Run the web dashboard (reads the testnet registry; connect [Freighter](https://www.freighter.app) on Testnet to sign):

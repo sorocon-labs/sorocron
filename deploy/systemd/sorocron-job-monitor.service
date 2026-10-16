@@ -1,0 +1,46 @@
+# Owner alerts for SoroCron jobs (`sorocron jobs monitor`) as a systemd service.
+#
+#   sudo cp sorocron-job-monitor.service /etc/systemd/system/
+#   sudo install -m 600 -o sorocron job-monitor.env /etc/sorocron/job-monitor.env
+#   sudo systemctl enable --now sorocron-job-monitor
+#   journalctl -u sorocron-job-monitor -f
+#
+# job-monitor.env holds STELLAR_NETWORK, ALERT_WEBHOOK_URL, ALERT_FORMAT and
+# MONITOR_OWNER. It only reads the registry, so it needs no secret key.
+# Expects the repository at /opt/sorocron, built as for the keeper (see
+# sorocron-keeper.service).
+
+[Unit]
+Description=SoroCron job owner alerts
+Documentation=https://github.com/sorocon-labs/sorocron/blob/main/keeper-bot/README.md#owner-alerts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sorocron
+Group=sorocron
+WorkingDirectory=/opt/sorocron/keeper-bot
+EnvironmentFile=/etc/sorocron/job-monitor.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node dist/cli.js jobs monitor --owner ${MONITOR_OWNER} --every 5m
+Restart=always
+RestartSec=30
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/opt/sorocron
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

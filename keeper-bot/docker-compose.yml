@@ -8,3 +8,19 @@ services:
     restart: unless-stopped
     ports:
       - "9464:9464"   # /metrics for Prometheus, /healthz for liveness probes
+
+  # Owner alerts for one account's jobs (`sorocron jobs monitor`):
+  #   docker compose --profile monitor up -d job-monitor
+  # Needs MONITOR_OWNER and ALERT_WEBHOOK_URL in .env; no secret key.
+  job-monitor:
+    profiles: ["monitor"]
+    build:
+      context: ..
+      dockerfile: keeper-bot/Dockerfile
+    env_file:
+      - .env
+    entrypoint: ["node", "dist/cli.js", "jobs", "monitor"]
+    command: ["--owner", "${MONITOR_OWNER:?set MONITOR_OWNER in .env}", "--every", "5m"]
+    restart: unless-stopped
+    healthcheck:
+      disable: true
