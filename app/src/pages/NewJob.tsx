@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   depositFor,
   describeSchedule,
@@ -9,6 +9,7 @@ import {
   schedule as sched,
   ttlGuardianArgs,
   type ArgType,
+  type FeeSuggestion,
   type JobParams,
 } from "@sorocron/sdk";
 import { StrKey, type xdr } from "@stellar/stellar-sdk";
@@ -198,6 +199,26 @@ export function NewJob() {
   const stepErrors = [action.errors, plan.errors, funding.errors, {}];
   const valid = (i: number) => Object.keys(stepErrors[i]).length === 0;
   const show = (errors: Record<string, string>, key: string) => (attempted ? errors[key] : undefined);
+
+  // What a run costs a keeper (#138), estimated by simulating the call once
+  // it's valid and the funding step is reached.
+  const [estimate, setEstimate] = useState<{ key: string; suggestion?: FeeSuggestion; error?: string }>();
+  const callKey = valid(0) ? `${action.target}.${action.fn}(${action.encoded.map((v) => v.toXDR("base64")).join(",")})` : "";
+  useEffect(() => {
+    if (!callKey || step < 2 || estimate?.key === callKey || typeof cron?.suggestFee !== "function") return;
+    let live = true;
+    cron.suggestFee({ target: action.target, function: action.fn, args: action.encoded }).then(
+      (suggestion) => live && setEstimate({ key: callKey, suggestion }),
+      (err: unknown) => live && setEstimate({ key: callKey, error: err instanceof Error ? err.message : String(err) }),
+    );
+    return () => {
+      live = false;
+    };
+    // `callKey` stands for the call's target, function and arguments.
+  }, [callKey, step, cron, estimate?.key]);
+  const suggestion = estimate?.key === callKey ? estimate.suggestion : undefined;
+  const estimateFailed = estimate?.key === callKey && estimate.error !== undefined;
+  const belowCost = suggestion !== undefined && funding.feePerRun > 0n && funding.feePerRun < suggestion.breakEvenStroops;
 
   const params: JobParams = {
     target: action.target,
@@ -442,13 +463,40 @@ export function NewJob() {
           {step === 2 && (
             <div className="form">
               <div className="grid-2">
-                <Field label="Fee per run" error={show(funding.errors, "fee")} hint="Paid to the keeper. It must cover their network fee, so keep it above about 0.01 XLM." htmlFor="fee">
+                <Field
+                  label="Fee per run"
+                  error={show(funding.errors, "fee")}
+                  hint={
+                    suggestion ? (
+                      <>
+                        A run costs a keeper about {formatAmount(suggestion.breakEvenStroops)} XLM right now. Suggested:{" "}
+                        <button type="button" className="link-btn" onClick={() => setFee(formatAmount(suggestion.suggestedStroops))}>
+                          {formatAmount(suggestion.suggestedStroops)} XLM
+                        </button>
+                      </>
+                    ) : estimateFailed ? (
+                      "Paid to the keeper, and it must cover their network fee. This call couldn't be simulated, so there's no estimate."
+                    ) : (
+                      "Paid to the keeper. It must cover their network fee."
+                    )
+                  }
+                  htmlFor="fee"
+                >
                   <TextInput id="fee" value={fee} onChange={setFee} inputMode="decimal" suffix="XLM" />
                 </Field>
                 <Field label="Runs to prepay" error={show(funding.errors, "prepaid")} hint="You can add more or withdraw later." htmlFor="prepaid">
                   <TextInput id="prepaid" value={prepaid} onChange={setPrepaid} inputMode="numeric" />
                 </Field>
               </div>
+              {belowCost && (
+                <div className="callout warning" role="status">
+                  <Icon name="alert" size={16} />
+                  <span>
+                    {formatAmount(funding.feePerRun)} XLM is below the {formatAmount(suggestion.breakEvenStroops)} XLM a run costs a keeper, so keepers will
+                    likely skip this job. Try {formatAmount(suggestion.suggestedStroops)} XLM.
+                  </span>
+                </div>
+              )}
               <div className="field">
                 <Switch checked={rampFee} onChange={setRampFee} label="Pay more when a run is late" />
                 {rampFee && (

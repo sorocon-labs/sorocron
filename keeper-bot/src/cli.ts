@@ -201,8 +201,27 @@ jobs
     };
     const deposit = fee * BigInt(o.runs);
     const cron = await client(true);
+    // What a keeper pays per run (#138): warn before creating a job keepers would skip.
+    const suggestion = await cron
+      .suggestFee({ target: params.target, function: params.function, args: params.args })
+      .catch((err: unknown) => {
+        console.error(`Note: ${err instanceof Error ? err.message : err}`);
+        return undefined;
+      });
+    if (suggestion && !json()) {
+      console.error(
+        `A run costs a keeper about ${xlm(suggestion.breakEvenStroops)}; suggested fee ${xlm(suggestion.suggestedStroops)}.`,
+      );
+    }
+    if (suggestion && fee < suggestion.breakEvenStroops) {
+      console.error(`Warning: ${xlm(fee)} is below what a run costs a keeper, so keepers will likely skip this job.`);
+    }
     const { hash, result } = await cron.createJob(params, deposit);
-    sent(hash, { job_id: result, deposit }, `Created job #${result}, deposit ${xlm(deposit)}.`);
+    sent(
+      hash,
+      { job_id: result, deposit, suggested_fee: suggestion?.suggestedStroops ?? null },
+      `Created job #${result}, deposit ${xlm(deposit)}.`,
+    );
   });
 
 const simple = (

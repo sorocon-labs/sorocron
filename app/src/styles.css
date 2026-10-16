@@ -737,6 +737,13 @@ p {
   margin-top: 3px;
   color: var(--muted);
 }
+.callout.warning {
+  background: var(--yellow-bg);
+  color: var(--yellow-fg);
+}
+.callout.warning .icon {
+  color: inherit;
+}
 
 /* ---- badges --------------------------------------------------------------- */
 
