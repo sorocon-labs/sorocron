@@ -154,6 +154,18 @@ Read-only commands work without a key; the others sign with
 `1h30m`, `1d`, and calendar times in UTC. Contract errors are shown with
 their code and a readable message.
 
+Add `--json` to any command for one JSON document instead of text, for
+scripts and monitoring. Amounts are in stroops and every 64- or 128-bit
+number is a string, so nothing loses precision. Commands that send print
+their result and `tx_hash`; errors go to stderr as
+`{"error": {"code", "name", "message"}}` with exit code 1.
+
+```bash
+npm run cli -- --json jobs list | jq '.[0].id'
+npm run cli -- --json jobs list --status underfunded | jq -r '.[].id'
+npm run cli -- --json keeper status | jq '.stake'
+```
+
 ### Jobs
 
 ```bash
@@ -188,6 +200,43 @@ npm run cli -- jobs cancel 7          # delete it and refund the balance
 npm run cli -- jobs transfer 7 GB...  # offer it to another account (v5 registries)
 npm run cli -- jobs accept 7          # run by that account to take it over
 ```
+
+### Following a job
+
+`jobs watch` prints a line for each run (success, fee, lateness and the
+transaction), top-up, withdrawal, pause, update, handover and cancellation
+of one job as it lands, until Ctrl+C or the job is cancelled. With `--json`
+it prints one JSON object per line.
+
+```bash
+npm run cli -- jobs watch 7                    # from now on
+npm run cli -- jobs watch 7 --from-ledger 5219929   # replay first (RPC keeps about a week)
+```
+
+```text
+2026-10-16T04:58:27Z  run 3 succeeded by GA3M…NF53, fee 0.1 XLM, 15s late, next run 2026-10-16T04:58:42.000Z  https://stellar.expert/explorer/testnet/tx/f2234f…
+2026-10-16T05:01:47Z  ran out of balance (0 XLM left); fund it to keep it running  https://stellar.expert/explorer/testnet/tx/c19a1b…
+```
+
+### Owner alerts
+
+`jobs monitor` checks an owner's jobs on an interval and posts to a
+Discord, Slack or generic webhook (the keeper's formats) once when a job's
+balance pays for fewer than `--min-runs` runs, once when it pauses itself
+after failing, and once when it's within `--ends-within` of its end time.
+Each alert fires again only after its condition clears, for example once
+the job is funded.
+
+```bash
+npm run cli -- jobs monitor --owner GABC... --webhook https://discord.com/api/webhooks/... \
+  --format discord --min-runs 5 --ends-within 2d --every 10m
+npm run cli -- jobs monitor --once    # one check of the configured account's jobs
+```
+
+To run it continuously, use `docker compose --profile monitor up -d
+job-monitor` (set `MONITOR_OWNER` and `ALERT_WEBHOOK_URL` in `.env`), or
+[`deploy/systemd/sorocron-job-monitor.service`](../deploy/systemd/sorocron-job-monitor.service).
+It only reads, so it needs no secret key when `--owner` is given.
 
 ### Keeper stake
 

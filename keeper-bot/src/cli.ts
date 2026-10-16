@@ -6,6 +6,8 @@
  *   npm run cli -- jobs create --target C... --function increment --arg u32:1 --every 1h --fee 0.1 --runs 24
  *   npm run cli -- keeper stake 100
  *   npm run cli -- keeper topup --to 100
+ *   npm run cli -- jobs watch 7
+ *   npm run cli -- --json jobs list | jq '.[0].id'
  *
  * Reads STELLAR_SECRET_KEY, STELLAR_NETWORK and the registry address from
  * keeper-bot/.env and deployments/<network>.json, like the keeper. Read-only
@@ -25,10 +27,14 @@ import {
   type Job,
   type JobParams,
 } from "@sorocron/sdk";
+import { Alerter, type WebhookFormat } from "./alerts.js";
 import { EXPLORER, connect, keypairFromEnv, networkConfig } from "./config.js";
 import { details, table } from "./format.js";
+import { OwnerWatch } from "./ownerAlerts.js";
 import { parseArgSpec, parseDaily, parseDuration, parseTime, parseWeekly } from "./parse.js";
 import { planTopUp } from "./topup.js";
+import { jobDetailView, jobView, keeperView, registryView, toJson } from "./views.js";
+import { describeJobEvent, jobEventJson, watchJob } from "./watch.js";
 
 const now = () => BigInt(Math.floor(Date.now() / 1000));
 const xlm = (v: bigint) => `${formatAmount(v)} XLM`;
@@ -50,7 +56,41 @@ function txLine(hash: string) {
 const program = new Command()
   .name("sorocron")
   .description("Manage SoroCron jobs and keeper stake")
+  .option("--json", "print one JSON document instead of text (amounts in stroops, as strings)")
   .showHelpAfterError();
+
+const json = () => Boolean(program.opts().json);
+
+/** Prints `value` as JSON with --json, otherwise the text `text()` builds. */
+function out(value: unknown, text: () => string) {
+  console.log(json() ? toJson(value) : text());
+}
+
+/** Output for a command that sent a transaction. */
+function sent(hash: string, value: Record<string, unknown>, text: string) {
+  out({ ...value, tx_hash: hash }, () => text + txLine(hash));
+}
+
+/** Resolves after `ms`, or as soon as Ctrl+C is pressed. */
+function interruptible() {
+  let stopped = false;
+  let wake = () => {};
+  process.once("SIGINT", () => {
+    stopped = true;
+    wake();
+  });
+  return {
+    stopped: () => stopped,
+    sleep: (ms: number) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      }),
+  };
+}
 
 // ---------------------------------------------------------------- jobs
 
@@ -69,6 +109,7 @@ jobs
     if (owner) list = list.filter((j) => j.owner === owner);
     const t = now();
     if (opts.status) list = list.filter((j) => jobStatus(j, t) === opts.status);
+    if (json()) return out(list.map((j) => jobView(j, t)), () => "");
     if (list.length === 0) return console.log("No jobs.");
     console.log(
       table(
@@ -99,6 +140,7 @@ jobs
       // Registries before v5 can't transfer jobs.
       cron.pendingJobOwner(job.id).catch(() => undefined),
     ]);
+    if (json()) return out(jobDetailView(job, now(), { due, feeNow: fee, pendingOwner }), () => "");
     console.log(
       details([
         ["Job", `#${job.id}`],
@@ -160,7 +202,7 @@ jobs
     const deposit = fee * BigInt(o.runs);
     const cron = await client(true);
     const { hash, result } = await cron.createJob(params, deposit);
-    console.log(`Created job #${result}, deposit ${xlm(deposit)}.${txLine(hash)}`);
+    sent(hash, { job_id: result, deposit }, `Created job #${result}, deposit ${xlm(deposit)}.`);
   });
 
 const simple = (
@@ -175,7 +217,7 @@ const simple = (
     .description(description)
     .action(async (id: string, amount?: string) => {
       const { hash } = await run(await client(true), BigInt(id), amount);
-      console.log(`${done.replace("{id}", id)}${txLine(hash)}`);
+      sent(hash, { job_id: BigInt(id), ...(amount ? { amount: parseAmount(amount) } : {}) }, done.replace("{id}", id));
     });
 
 simple("fund", "Add XLM to a job's balance", (c, id, a) => c.fundJob(id, parseAmount(a!)), "Funded job #{id}.", true);
@@ -194,10 +236,79 @@ jobs
       address === cron.publicKey
         ? `Withdrew the pending handover of job #${id}.`
         : `Offered job #${id} to ${address}. It becomes theirs when they run \`sorocron jobs accept ${id}\`.`;
-    console.log(done + txLine(hash));
+    sent(hash, { job_id: BigInt(id), proposed_owner: address }, done);
   });
 
 simple("accept", "Take over a job that was transferred to you", (c, id) => c.acceptJobOwner(id), "Job #{id} is now yours.");
+
+jobs
+  .command("watch <id>")
+  .description("Print a line for each run, top-up, pause or change of a job as it happens (Ctrl+C to stop)")
+  .option("--from-ledger <ledger>", "replay from this ledger instead of starting now")
+  .option("--every <duration>", "how often to check for new events", "5s")
+  .action(async (id: string, o: { fromLedger?: string; every: string }) => {
+    const cron = await client();
+    const jobId = BigInt(id);
+    if (!json()) console.error(`Watching job #${id}${o.fromLedger ? ` from ledger ${o.fromLedger}` : ""}. Ctrl+C to stop.`);
+    const { stopped, sleep } = interruptible();
+    await watchJob(
+      { events: (options) => cron.events(options), latestLedger: async () => (await cron.server.getLatestLedger()).sequence },
+      jobId,
+      {
+        fromLedger: o.fromLedger ? Number(o.fromLedger) : undefined,
+        pollMs: Number(parseDuration(o.every)) * 1000,
+        stopped,
+        sleep,
+        // One JSON object per line with --json, for piping into jq.
+        print: (e) =>
+          console.log(
+            json()
+              ? JSON.stringify(jobEventJson(e), (_, v) => (typeof v === "bigint" ? v.toString() : v))
+              : `${e.closedAt}  ${describeJobEvent(e)}${txLine(e.txHash).replace("\n", "  ")}`,
+          ),
+      },
+    );
+  });
+
+jobs
+  .command("monitor")
+  .description("Alert a webhook when your jobs run low on balance, pause after failures or near their end time")
+  .option("--owner <address>", "whose jobs to watch (default: the configured account)")
+  .option("--webhook <url>", "Discord, Slack or generic JSON webhook (default: ALERT_WEBHOOK_URL)")
+  .option("--format <format>", "discord, slack or generic (default: ALERT_FORMAT, else generic)")
+  .option("--min-runs <n>", "alert when the balance pays for fewer runs than this", "3")
+  .option("--ends-within <duration>", "alert when a job stops running within this", "1d")
+  .option("--every <duration>", "how often to check", "5m")
+  .option("--once", "check once and exit")
+  .action(async (o: { owner?: string; webhook?: string; format?: string; minRuns: string; endsWithin: string; every: string; once?: boolean }) => {
+    const cron = await client();
+    const owner = o.owner ?? keypairFromEnv().publicKey();
+    const url = o.webhook ?? process.env.ALERT_WEBHOOK_URL ?? "";
+    const alerts = new Alerter({
+      url,
+      format: (o.format ?? process.env.ALERT_FORMAT ?? "generic") as WebhookFormat,
+      // OwnerWatch already sends each alert once per condition.
+      cooldownMs: 0,
+      source: `jobs of ${owner.slice(0, 6)}…`,
+      log: (m) => console.error(m),
+    });
+    const watch = new OwnerWatch({ minRuns: BigInt(o.minRuns), endsWithin: parseDuration(o.endsWithin) });
+    if (!url) console.error("No --webhook or ALERT_WEBHOOK_URL: alerts are only printed.");
+    const { stopped, sleep } = interruptible();
+    do {
+      try {
+        const ids = await cron.jobsByOwner(owner);
+        const list = (await Promise.all(ids.map((id) => cron.getJob(id)))).filter((j): j is Job => Boolean(j));
+        for (const { alert } of watch.check(list, now())) {
+          out({ ...alert, owner }, () => `${new Date().toISOString()}  [${alert.severity}] ${alert.message}`);
+          await alerts.notify(alert, `${alert.kind}:${alert.details?.job}`);
+        }
+      } catch (err) {
+        console.error(`check failed: ${err instanceof Error ? err.message : err}`);
+      }
+      if (!o.once) await sleep(Number(parseDuration(o.every)) * 1000);
+    } while (!o.once && !stopped());
+  });
 
 // ---------------------------------------------------------------- keeper
 
@@ -210,6 +321,7 @@ keeper
     const cron = await client();
     const who = address ?? keypairFromEnv().publicKey();
     const [info, stats, config] = await Promise.all([cron.getKeeper(who), cron.keeperStats(who), cron.config()]);
+    if (json()) return out(keeperView(who, info, stats, config.min_stake), () => "");
     if (!info || !stats) return console.log(`${who} is not a keeper. Stake at least ${xlm(config.min_stake)} to become one.`);
     const unbonding = info.unbonding_at ?? undefined;
     console.log(
@@ -238,7 +350,7 @@ keeper
   .description("Stake XLM (registers you as a keeper the first time)")
   .action(async (amount: string) => {
     const { hash, result } = await (await client(true)).stake(parseAmount(amount));
-    console.log(`Staked. Total stake: ${xlm(result)}.${txLine(hash)}`);
+    sent(hash, { staked: parseAmount(amount), total_stake: result }, `Staked. Total stake: ${xlm(result)}.`);
   });
 
 keeper
@@ -263,13 +375,16 @@ keeper
       );
     }
     if (plan.action === "none") {
-      return console.log(`Stake is ${xlm(plan.stake)}, already at least ${xlm(plan.target)}. Nothing to do.`);
+      return out({ action: "none", stake: plan.stake, target: plan.target }, () => `Stake is ${xlm(plan.stake)}, already at least ${xlm(plan.target)}. Nothing to do.`);
     }
     if (o.dryRun) {
-      return console.log(`Would stake ${xlm(plan.amount)} to bring ${xlm(plan.stake)} up to ${xlm(plan.target)}.`);
+      return out(
+        { action: "stake", amount: plan.amount, stake: plan.stake, target: plan.target, dry_run: true },
+        () => `Would stake ${xlm(plan.amount)} to bring ${xlm(plan.stake)} up to ${xlm(plan.target)}.`,
+      );
     }
     const { hash, result } = await cron.stake(plan.amount);
-    console.log(`Topped up ${xlm(plan.amount)}. Total stake: ${xlm(result)}.${txLine(hash)}`);
+    sent(hash, { action: "stake", amount: plan.amount, total_stake: result }, `Topped up ${xlm(plan.amount)}. Total stake: ${xlm(result)}.`);
   });
 
 keeper
@@ -277,7 +392,7 @@ keeper
   .description("Stop executing and start the unbonding timer")
   .action(async () => {
     const { hash, result } = await (await client(true)).beginUnbonding();
-    console.log(`Unbonding. Withdrawable at ${new Date(Number(result) * 1000).toISOString()}.${txLine(hash)}`);
+    sent(hash, { withdrawable_at: result }, `Unbonding. Withdrawable at ${new Date(Number(result) * 1000).toISOString()}.`);
   });
 
 keeper
@@ -285,7 +400,7 @@ keeper
   .description("Withdraw your stake once unbonding has finished")
   .action(async () => {
     const { hash, result } = await (await client(true)).withdrawStake();
-    console.log(`Withdrew ${xlm(result)}.${txLine(hash)}`);
+    sent(hash, { withdrawn: result }, `Withdrew ${xlm(result)}.`);
   });
 
 keeper
@@ -293,7 +408,11 @@ keeper
   .description("Pay out every listed keeper whose unbonding has finished (anyone can do this)")
   .action(async (addresses: string[]) => {
     const { hash, result } = await (await client(true)).withdrawStakes(addresses);
-    console.log(table(["KEEPER", "RELEASED"], addresses.map((a, i) => [a, xlm(result[i] ?? 0n)])) + txLine(hash));
+    sent(
+      hash,
+      { released: addresses.map((keeper, i) => ({ keeper, amount: result[i] ?? 0n })) },
+      table(["KEEPER", "RELEASED"], addresses.map((a, i) => [a, xlm(result[i] ?? 0n)])),
+    );
   });
 
 // ---------------------------------------------------------------- registry
@@ -307,6 +426,7 @@ program
     // Upgrades wait for a delay from v5 on; older registries upgrade immediately.
     const [delay, upgrade] =
       version >= 5 ? await Promise.all([cron.upgradeDelay(), cron.pendingUpgrade()]) : [undefined, undefined];
+    if (json()) return out(registryView(cron.contractId, version, count, c, delay, upgrade ?? undefined), () => "");
     console.log(
       details([
         ["Registry", `${cron.contractId} (interface v${version})`],
@@ -329,7 +449,14 @@ program
   });
 
 program.parseAsync().catch((err: unknown) => {
-  if (err instanceof SoroCronError) {
+  if (json()) {
+    // Contract errors keep their code and name so scripts can branch on them.
+    const error =
+      err instanceof SoroCronError
+        ? { code: err.code, name: err.errorName, message: err.message }
+        : { code: null, name: null, message: err instanceof Error ? err.message : String(err) };
+    console.error(toJson({ error }));
+  } else if (err instanceof SoroCronError) {
     console.error(`Error ${err.code} (${err.errorName}): ${err.message}`);
   } else {
     console.error(err instanceof Error ? err.message : String(err));

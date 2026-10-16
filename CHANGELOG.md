@@ -27,6 +27,10 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - **Keeper dashboard and alert rules**: `deploy/grafana/sorocron-keeper.json` and `deploy/prometheus/alerts.yml` cover runs, earnings, balances, fee bids, tick health, RPC endpoints, restores and announced upgrades. CI runs `promtool check rules` and checks that both only query metrics the keepers export; the keeper adds `sorocron_keeper_max_inclusion_fee_stroops`. ([#135](https://github.com/sorocon-labs/sorocron/issues/135))
 - **Upgrade alerts**: the keeper reads `pending_upgrade` every tick, posts one `upgrade_announced` alert per announcement saying when it can be applied, and exports `sorocron_keeper_upgrade_available_at_seconds`. ([#132](https://github.com/sorocon-labs/sorocron/issues/132))
 
+- **CLI `--json`**: every command prints one JSON document instead of text, with amounts in stroops as strings; commands that send add `tx_hash`, and errors keep the contract error's code and name. ([#114](https://github.com/sorocon-labs/sorocron/issues/114))
+- **`sorocron jobs watch <id>`** prints each run (fee, lateness, transaction), top-up, pause, update, handover and cancellation of a job as it lands; `--from-ledger` replays and `--json` prints one object per line. ([#133](https://github.com/sorocon-labs/sorocron/issues/133))
+- **Owner alerts**: `sorocron jobs monitor` posts to a Discord, Slack or generic webhook once when a job's balance drops below `--min-runs` runs, once when it pauses itself after failures, and once before its end time, with a Docker Compose profile and a systemd unit for running it continuously. ([#136](https://github.com/sorocon-labs/sorocron/issues/136))
+
 ### Fixed
 - The keeper splits a batch that costs more than it earns instead of skipping all of it, so one expensive job no longer holds back cheap ones.
 - The dashboard's Attention filter now includes failing jobs, which were only listed under All.

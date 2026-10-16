@@ -17,7 +17,11 @@ export type AlertKind =
   | "keeper_ineligible"
   | "rpc_down"
   | "runs_failing"
-  | "upgrade_announced";
+  | "upgrade_announced"
+  // Owner alerts from `sorocron jobs monitor` (see ownerAlerts.ts).
+  | "job_low_balance"
+  | "job_paused"
+  | "job_ending";
 
 export interface Alert {
   kind: AlertKind;
