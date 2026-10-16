@@ -26,7 +26,14 @@ while deploying your own copy of the contracts.
 ```bash
 npm run keeper                   # run until stopped
 npm run keeper -- --once         # one pass, e.g. from cron
+npm run keeper -- --dry-run      # simulate only: log what would run, send nothing
 ```
+
+`--dry-run` ticks as usual and simulates every batch, then logs which jobs
+it would execute with what they'd earn and cost. It never funds, stakes,
+restores, signs or sends, so it's safe for trying a new `BATCH_SIZE`,
+`MIN_PROFIT_STROOPS` or fee setting against a live registry. Combine it with
+`--once` for a single report.
 
 Each tick it:
 
@@ -39,7 +46,8 @@ Each tick it:
    transaction. Each batch is simulated first; the simulation reports
    exactly which jobs would run (resolvers, dependencies and assigned keeper
    windows included), and a batch is only sent if something runs and the
-   fees cover the network cost.
+   fees cover the network cost. A batch that doesn't pay is split in halves,
+   so one expensive job doesn't hold back cheap ones.
 3. **Bids the inclusion fee from network conditions.** It bids the
    `FEE_PERCENTILE` of recent Soroban inclusion fees and steps up (p90, p95,
    p99, max) after a failed or timed-out send, never above
@@ -82,6 +90,7 @@ told when:
 | `keeper_ineligible` | The keeper can no longer execute (below the minimum, or unbonding) |
 | `rpc_down` | Three ticks in a row failed |
 | `runs_failing` | Every send failed for three ticks in a row |
+| `upgrade_announced` | The admin announced a registry upgrade; says when it can be applied, so you can unbond first if you disagree. Once per announcement |
 
 Each alert repeats at most once per `ALERT_COOLDOWN_MS` (default one hour).
 
@@ -99,15 +108,17 @@ poll intervals.
 | `sorocron_keeper_last_tick_timestamp_seconds` | gauge | When the last tick finished |
 | `sorocron_keeper_jobs_indexed` | gauge | Live jobs in the index |
 | `sorocron_keeper_jobs_due` | gauge | Jobs that looked due in the last tick |
-| `sorocron_keeper_jobs_total{outcome}` | counter | Due jobs by outcome: `executed`, `skipped`, `unprofitable`, `failed` |
+| `sorocron_keeper_jobs_total{outcome}` | counter | Due jobs by outcome: `executed`, `skipped`, `unprofitable`, `failed`, `dry_run` |
 | `sorocron_keeper_batches_total` | counter | `execute_batch` transactions sent |
 | `sorocron_keeper_fees_earned_stroops_total` | counter | Fees earned (native XLM jobs) |
 | `sorocron_keeper_balance_stroops{account}` | gauge | XLM balance of the keeper and each channel |
 | `sorocron_keeper_inclusion_fee_stroops` | gauge | Current inclusion fee bid |
+| `sorocron_keeper_max_inclusion_fee_stroops` | gauge | `MAX_INCLUSION_FEE`, the highest bid it will make |
 | `sorocron_keeper_rpc_calls_last_sync` | gauge | RPC calls the last index sync made |
 | `sorocron_keeper_jobs_quarantined` | gauge | Due jobs set aside after failing on their own |
 | `sorocron_keeper_restores_total` | counter | Archived-state restores sent before executing |
 | `sorocron_keeper_restore_fees_stroops_total` | counter | Resource fees of those restores |
+| `sorocron_keeper_upgrade_available_at_seconds` | gauge | When an announced registry upgrade can be applied; 0 when none is pending |
 | `sorocron_keeper_rpc_up{endpoint}` | gauge | With several endpoints: whether each answered its last probe |
 | `sorocron_keeper_rpc_active{endpoint}` | gauge | 1 for the endpoint in use, 0 for the others |
 | `sorocron_keeper_rpc_latest_ledger{endpoint}` | gauge | Latest ledger each endpoint reported |

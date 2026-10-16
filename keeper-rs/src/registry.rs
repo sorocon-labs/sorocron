@@ -151,6 +151,14 @@ pub fn batches(ids: &[u64], size: usize) -> Vec<Vec<u64>> {
     ids.chunks(size.clamp(1, 20)).map(<[u64]>::to_vec).collect()
 }
 
+/// Splits a batch that doesn't pay into two halves to try separately, so
+/// one expensive job can't hold back cheap ones. The first half is the
+/// larger.
+pub fn halves(ids: &[u64]) -> (Vec<u64>, Vec<u64>) {
+    let (a, b) = ids.split_at(ids.len().div_ceil(2));
+    (a.to_vec(), b.to_vec())
+}
+
 /// `execute_batch` returns, per job, whether it would run.
 pub fn ran_flags(value: &ScVal, len: usize) -> Vec<bool> {
     let flags: Vec<bool> = match value {
@@ -416,6 +424,13 @@ mod tests {
         assert_eq!(batches(&[1, 2, 3], 50), vec![vec![1, 2, 3]]);
         assert_eq!(batches(&(0..25).collect::<Vec<_>>(), 100).len(), 2);
         assert!(batches(&[], 10).is_empty());
+    }
+
+    #[test]
+    fn halves_an_unprofitable_batch() {
+        assert_eq!(halves(&[1, 2, 3, 4]), (vec![1, 2], vec![3, 4]));
+        assert_eq!(halves(&[1, 2, 3]), (vec![1, 2], vec![3]));
+        assert_eq!(halves(&[7, 9]), (vec![7], vec![9]));
     }
 
     #[test]

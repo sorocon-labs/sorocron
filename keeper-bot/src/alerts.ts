@@ -3,14 +3,21 @@
  *
  * Posts to a Discord, Slack or generic JSON webhook when something needs a
  * human: the keeper or a channel account is low on XLM, the keeper's stake
- * no longer qualifies it to execute, the RPC server keeps failing, or the
- * keeper's runs keep failing. Each alert key fires at most once per
+ * no longer qualifies it to execute, the RPC server keeps failing, the
+ * keeper's runs keep failing, or the admin announces a registry upgrade
+ * (see upgrades.ts). Each alert key fires at most once per
  * cooldown, so a persistent problem doesn't flood the channel, and a
  * webhook failure is logged, never thrown into the keeper loop.
  */
 import type { Logger } from "./logger.js";
 
-export type AlertKind = "low_balance" | "low_stake" | "keeper_ineligible" | "rpc_down" | "runs_failing";
+export type AlertKind =
+  | "low_balance"
+  | "low_stake"
+  | "keeper_ineligible"
+  | "rpc_down"
+  | "runs_failing"
+  | "upgrade_announced";
 
 export interface Alert {
   kind: AlertKind;

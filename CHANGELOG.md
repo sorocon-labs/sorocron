@@ -23,7 +23,12 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - **Rust keeper batching and metrics**: `keeper-rs` runs due jobs in `execute_batch` transactions, sends only batches that run something and pay for themselves, and serves `/metrics` and `/healthz` with the TypeScript keeper's metric names. ([#116](https://github.com/sorocon-labs/sorocron/issues/116))
 - **Dashboard accessibility**: selects are WAI-ARIA comboboxes with Home and End, the date picker's calendar has rows and arrow-key, Page Up and Page Down navigation and returns focus on close, job lists name each job with its status and schedule, headings follow the page outline, and secondary text meets WCAG AA contrast in both themes. `axe-core` checks run in CI. ([#120](https://github.com/sorocon-labs/sorocron/issues/120))
 
+- **Keeper dry runs**: `npm run keeper -- --dry-run` simulates every batch and logs what it would execute, with earnings and costs, and never funds, stakes, restores, signs or sends. ([#113](https://github.com/sorocon-labs/sorocron/issues/113))
+- **Keeper dashboard and alert rules**: `deploy/grafana/sorocron-keeper.json` and `deploy/prometheus/alerts.yml` cover runs, earnings, balances, fee bids, tick health, RPC endpoints, restores and announced upgrades. CI runs `promtool check rules` and checks that both only query metrics the keepers export; the keeper adds `sorocron_keeper_max_inclusion_fee_stroops`. ([#135](https://github.com/sorocon-labs/sorocron/issues/135))
+- **Upgrade alerts**: the keeper reads `pending_upgrade` every tick, posts one `upgrade_announced` alert per announcement saying when it can be applied, and exports `sorocron_keeper_upgrade_available_at_seconds`. ([#132](https://github.com/sorocon-labs/sorocron/issues/132))
+
 ### Fixed
+- The keeper splits a batch that costs more than it earns instead of skipping all of it, so one expensive job no longer holds back cheap ones.
 - The dashboard's Attention filter now includes failing jobs, which were only listed under All.
 
 ### Changed

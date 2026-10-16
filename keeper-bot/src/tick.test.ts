@@ -33,7 +33,11 @@ function fees(): FeeBidder & { escalations: number; resets: number } {
 /** A channel whose simulation runs every job in `runnable`. */
 function channel(
   runnable: (id: bigint) => boolean,
-  opts: { resourceFee?: bigint; send?: () => Promise<{ hash: string }>; log?: bigint[][] } = {},
+  opts: {
+    resourceFee?: bigint | ((ids: bigint[]) => bigint);
+    send?: () => Promise<{ hash: string }>;
+    log?: bigint[][];
+  } = {},
 ): BatchClient {
   return {
     async prepareExecuteBatch(ids) {
@@ -41,7 +45,7 @@ function channel(
       const result = ids.map(runnable);
       const prepared: Prepared<boolean[]> = {
         result,
-        resourceFee: opts.resourceFee ?? 100_000n,
+        resourceFee: typeof opts.resourceFee === "function" ? opts.resourceFee(ids) : (opts.resourceFee ?? 100_000n),
         send: async () => ({ hash: "h", result, ...(opts.send ? await opts.send() : {}) }),
       };
       return prepared;
@@ -213,6 +217,15 @@ describe("tick", () => {
       expect(summary).toMatchObject({ skipped: 1, executed: 0, restores: 0 });
       expect(d.lines.join(" | ")).toMatch(/Restore transaction failed/);
     });
+
+    it("never restores in a dry run", async () => {
+      const { client, calls } = archived(5_000n, async () => ({ hash: "r" }));
+      const d = deps({ index: index(due(1)), channels: new ChannelPool([client]), maxRestoreFee: 10_000n, dryRun: true });
+      const summary = await tick(d, 0n);
+      expect(calls.restores).toBe(0);
+      expect(summary).toMatchObject({ skipped: 1, restores: 0, dryRun: 0 });
+      expect(d.lines.join(" | ")).toMatch(/would restore archived state first \(~5000 stroops\)/);
+    });
   });
 
   describe("one bad job", () => {
@@ -303,6 +316,64 @@ describe("tick", () => {
       expect(q.has(7n)).toBe(true);
       q.next();
       expect(q.has(7n)).toBe(false);
+    });
+  });
+
+  describe("expensive jobs", () => {
+    // Job 3 costs 30 XLM to run; the others 0.01 XLM. Each pays 0.1 XLM.
+    const costs = (ids: bigint[]) => ids.reduce((sum, id) => sum + (id === 3n ? 300_000_000n : 100_000n), 0n);
+
+    it("runs the jobs that pay for themselves when one makes the batch unprofitable", async () => {
+      const sims: bigint[][] = [];
+      const d = deps({
+        index: index(due(1, 2, 3, 4)),
+        channels: new ChannelPool([channel(() => true, { resourceFee: costs, log: sims })]),
+        batchSize: 4,
+      });
+      const summary = await tick(d, 0n);
+      expect(sims).toEqual([[1n, 2n, 3n, 4n], [1n, 2n], [3n, 4n], [3n], [4n]]);
+      expect(summary).toMatchObject({ due: 4, batches: 2, executed: 3, unprofitable: 1, skipped: 0 });
+      expect(d.lines).toContain("jobs 3: unprofitable (earns 1000000, costs ~300000200 stroops)");
+    });
+
+    it("splits only the jobs simulation says would run", async () => {
+      const sims: bigint[][] = [];
+      const d = deps({
+        index: index(due(1, 2, 3)),
+        channels: new ChannelPool([channel((id) => id !== 1n, { resourceFee: costs, log: sims })]),
+        batchSize: 3,
+      });
+      const summary = await tick(d, 0n);
+      expect(sims).toEqual([[1n, 2n, 3n], [2n], [3n]]);
+      expect(summary).toMatchObject({ executed: 1, unprofitable: 1, skipped: 1 });
+    });
+  });
+
+  describe("dry run (#113)", () => {
+    it("simulates and logs what would run, and never sends", async () => {
+      let sends = 0;
+      const d = deps({
+        index: index(due(1, 2, 3)),
+        channels: new ChannelPool([
+          channel((id) => id !== 2n, { resourceFee: 250_000n, send: async () => (sends++, { hash: "x" }) }),
+        ]),
+        batchSize: 3,
+        dryRun: true,
+      });
+      const summary = await tick(d, 0n);
+      expect(sends).toBe(0);
+      expect(summary).toMatchObject({ due: 3, batches: 0, executed: 0, skipped: 1, dryRun: 2, earnedStroops: 0n });
+      expect(d.lines).toEqual(["jobs 1,3: would execute (earns 2000000, costs ~250200 stroops)"]);
+    });
+
+    it("still reports jobs that wouldn't pay", async () => {
+      const d = deps({
+        index: index(due(1)),
+        channels: new ChannelPool([channel(() => true, { resourceFee: 5_000_000n })]),
+        dryRun: true,
+      });
+      const summary = await tick(d, 0n);
+      expect(summary).toMatchObject({ unprofitable: 1, dryRun: 0 });
     });
   });
 });

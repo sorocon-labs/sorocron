@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use config::Config;
 use metrics::Metrics;
-use registry::{batches, BatchOutcome, Registry};
+use registry::{batches, halves, BatchOutcome, Registry};
 
 fn log(message: impl AsRef<str>) {
     let now = std::time::SystemTime::now()
@@ -123,6 +123,13 @@ async fn tick(
             Ok(BatchOutcome::Skipped(reason)) => {
                 summary.skipped += size;
                 log(format!("{label}: skipped ({reason})"));
+            }
+            // One expensive job can sink the batch: try what runs in halves.
+            Ok(BatchOutcome::Unprofitable { ran, .. }) if ran.len() > 1 => {
+                summary.skipped += size - ran.len() as u64;
+                let (first, second) = halves(&ran);
+                queue.push_front(second);
+                queue.push_front(first);
             }
             Ok(BatchOutcome::Unprofitable { ran, earned, cost }) => {
                 summary.unprofitable += ran.len() as u64;

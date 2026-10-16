@@ -234,3 +234,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker build -f keeper-bot/Dockerfile -t sorocron-keeper .
+
+  monitoring:
+    name: Keeper alert rules and dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: promtool check rules (issue #135)
+        run: >-
+          docker run --rm -v "$PWD/deploy/prometheus:/rules:ro" --entrypoint promtool
+          prom/prometheus:v3.5.0 check rules /rules/alerts.yml
+      - name: Dashboard and alerts only query metrics the keepers export
+        run: node scripts/check-monitoring.mjs

@@ -115,20 +115,39 @@ build your own with `docker build -f keeper-bot/Dockerfile .`.
 
 Scrape `/metrics` with Prometheus (the Kubernetes manifests carry the usual
 `prometheus.io/*` annotations, and the Helm chart can create a
-ServiceMonitor). The metric list and ready-made Grafana queries are in the
-[keeper README](../../keeper-bot/README.md#metrics). Alert on at least:
+ServiceMonitor). The metric list and example queries are in the
+[keeper README](../../keeper-bot/README.md#metrics).
+
+Two files in `deploy/` save building these by hand:
+
+- [`deploy/grafana/sorocron-keeper.json`](../../deploy/grafana/sorocron-keeper.json):
+  import it in Grafana (Dashboards, New, Import) and pick your Prometheus
+  data source. It shows runs by outcome, XLM earned, account balances, the
+  fee bid against its maximum, tick health, RPC endpoints, restores, jobs set
+  aside and any announced upgrade, for one keeper or all of them.
+- [`deploy/prometheus/alerts.yml`](../../deploy/prometheus/alerts.yml): add
+  it to `rule_files` in `prometheus.yml`. CI checks it with
+  `promtool check rules`.
+
+They implement this table, which is what to alert on at least:
 
 | Condition | Query | Why |
 |---|---|---|
 | Keeper stalled | `time() - sorocron_keeper_last_tick_timestamp_seconds > 60` | RPC down, crashed, out of XLM |
 | Sends failing | failed share of `sorocron_keeper_jobs_total` above 20% for 15 minutes | Fee bids too low, competition, RPC trouble |
 | Low balance | `min(sorocron_keeper_balance_stroops) / 1e7 < 5` | Runs will start failing |
-| Fee bid maxed | `sorocron_keeper_inclusion_fee_stroops >= MAX_INCLUSION_FEE` | Congestion beyond your ceiling |
+| Fee bid maxed | `sorocron_keeper_inclusion_fee_stroops >= sorocron_keeper_max_inclusion_fee_stroops` | Congestion beyond your ceiling |
+| Upgrade announced | `sorocron_keeper_upgrade_available_at_seconds > 0` | New registry code is coming; unbond before it applies if you disagree |
 
 The webhook alerts (`ALERT_WEBHOOK_URL`) cover the same failures without a
 Prometheus stack, and add stake alerts: `low_stake` when the stake is
 within 10% of the registry minimum, `keeper_ineligible` when the keeper
-can't execute any more.
+can't execute any more. `upgrade_announced` fires once per announced
+registry upgrade.
+
+To try a configuration change against the live registry first, run
+`npm run keeper -- --dry-run --once`: it simulates everything and sends
+nothing.
 
 ## Running several keepers
 

@@ -1,8 +1,9 @@
 /**
  * Reference SoroCron keeper node.
  *
- *   npm run keeper            run until stopped
- *   npm run keeper -- --once  single pass (useful in CI or cron)
+ *   npm run keeper                run until stopped
+ *   npm run keeper -- --once      single pass (useful in CI or cron)
+ *   npm run keeper -- --dry-run   simulate only: log what would run, send nothing
  *
  * Keeps a local index of jobs from registry events, executes due jobs in
  * batches through one or more channel accounts, bids inclusion fees from
@@ -43,8 +44,11 @@ import { withRetry } from "./retry.js";
 import { Quarantine } from "./quarantine.js";
 import { planTopUp } from "./topup.js";
 import { tick, type BatchClient, type TickSummary } from "./tick.js";
+import { UpgradeWatch } from "./upgrades.js";
 
 const once = process.argv.includes("--once");
+/** Simulate only: never fund, stake, restore, sign or send (#113). */
+const dryRun = process.argv.includes("--dry-run");
 const logger = createLogger();
 const log = logger.info;
 
@@ -61,8 +65,10 @@ async function main() {
   const keeperKeys = keypairFromEnv();
   const keeper = keeperKeys.publicKey();
   const channelKeys: Keypair[] = channelKeypairsFromEnv();
-  await ensureFunded(keeperKeys);
-  for (const k of channelKeys) await ensureFunded(k);
+  if (!dryRun) {
+    await ensureFunded(keeperKeys);
+    for (const k of channelKeys) await ensureFunded(k);
+  }
 
   const contractId = registryId();
   const endpoints = new Endpoints(RPC_URLS);
@@ -117,6 +123,8 @@ async function main() {
   const feeOptions = { percentile: settings.feePercentile, maxFee: settings.maxInclusionFee };
   let fees = new FeeStrategy(server, feeOptions);
   const quarantine = new Quarantine(QUARANTINE_TICKS);
+  const upgrades = new UpgradeWatch();
+  let watchUpgrades = true;
   const index = new JobIndex(
     {
       // Reads retry with backoff on transient RPC errors.
@@ -135,7 +143,8 @@ async function main() {
     `Keeper ${keeper} watching registry ${contractId} with ${channels.size} channel(s)` +
       (failover ? ` through ${endpointLabel(connected)} (${servers.size} RPC endpoints)` : "") +
       (metricsServer ? `, metrics on :${settings.metricsPort}` : "") +
-      (alerts.enabled ? ", alerts on" : ""),
+      (alerts.enabled ? ", alerts on" : "") +
+      (dryRun ? " (dry run: nothing will be signed or sent)" : ""),
   );
 
   let stopping = false;
@@ -169,8 +178,31 @@ async function main() {
       await checkAccounts(server, keeper, channelKeys, metrics, alerts);
       await topUpStake(cron, keeper);
       await checkStake(cron, keeper, config.min_stake, alerts);
+      if (watchUpgrades) {
+        try {
+          const announced = upgrades.update(await cron.pendingUpgrade());
+          if (announced) {
+            logger.warn(announced.message);
+            await alerts.notify(announced, `upgrade_announced:${announced.details?.wasmHash}`);
+          }
+          metrics.set(
+            "sorocron_keeper_upgrade_available_at_seconds",
+            "Unix time an announced registry upgrade can be applied, 0 when none is pending",
+            upgrades.availableAt,
+          );
+        } catch (err) {
+          // Registries before v5 have no upgrade announcements to watch.
+          if (/no "pending_upgrade" function/.test(String(err))) watchUpgrades = false;
+          else throw err;
+        }
+      }
       await fees.refresh();
       metrics.set("sorocron_keeper_inclusion_fee_stroops", "Current inclusion fee bid", fees.current());
+      metrics.set(
+        "sorocron_keeper_max_inclusion_fee_stroops",
+        "Highest inclusion fee the keeper will bid (MAX_INCLUSION_FEE)",
+        settings.maxInclusionFee,
+      );
 
       const started = Date.now();
       const summary = await tick(
@@ -187,6 +219,7 @@ async function main() {
           maxRestoreFee: settings.maxRestoreFee,
           maxCostPerJob: settings.maxCostPerJob,
           quarantine,
+          dryRun,
         },
         BigInt(Math.floor(Date.now() / 1000)),
       );
@@ -299,7 +332,7 @@ async function checkAccounts(
 
 /** Stakes up to TOPUP_STAKE_TO_XLM whenever the keeper holds less (#76). */
 async function topUpStake(cron: SoroCron, keeper: string) {
-  if (!settings.topUpStakeTo) return;
+  if (!settings.topUpStakeTo || dryRun) return;
   try {
     // While unbonding the plan is "blocked"; checkStake alerts about that.
     const plan = planTopUp(await cron.getKeeper(keeper), settings.topUpStakeTo);
@@ -345,6 +378,7 @@ function recordTick(metrics: Metrics, summary: TickSummary, durationMs: number, 
   metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "skipped" }, summary.skipped);
   metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "unprofitable" }, summary.unprofitable);
   metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "failed" }, summary.failed);
+  metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "dry_run" }, summary.dryRun);
   metrics.inc("sorocron_keeper_restores_total", "Archived-state restores sent before executing", {}, summary.restores);
   metrics.set("sorocron_keeper_jobs_quarantined", "Due jobs set aside after failing on their own", summary.quarantined);
   metrics.inc(
