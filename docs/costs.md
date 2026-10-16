@@ -26,7 +26,7 @@ The network rejects contracts over 64 KiB, and every call pays to load the
 code, so the budget keeps a margin for urgent fixes as well as keeping calls
 cheap.
 
-The registry is 54,197 bytes. About 30 KB is code, 3 KB data, and 19 KB the
+The registry is about 54 KB (see `contracts/wasm-sizes.txt`). About 30 KB is code, 3 KB data, and 19 KB the
 contract spec: every exported function, type, event and error, with its doc
 comments. soroban-sdk copies `///` comments on exported items into the spec,
 so:

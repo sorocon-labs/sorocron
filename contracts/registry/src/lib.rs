@@ -23,6 +23,8 @@ mod storage;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
+mod test_review;
+#[cfg(test)]
 mod test_security;
 #[cfg(test)]
 mod test_v4;
@@ -476,6 +478,7 @@ impl SoroCron {
         if info.unbonding_at.is_some() {
             return Err(Error::KeeperUnbonding);
         }
+        let was_eligible = ensure_active_keeper(&config, &info).is_ok();
 
         token::TokenClient::new(&env, &config.stake_token).transfer(
             &keeper,
@@ -484,7 +487,11 @@ impl SoroCron {
         );
         info.stake += amount;
         storage::set_keeper(&env, &keeper, &info);
-        storage::add_active_keeper(&env, &keeper, MAX_ACTIVE_KEEPERS);
+        // Joining the rotation or becoming eligible reassigns some runs.
+        let joined = storage::add_active_keeper(&env, &keeper, MAX_ACTIVE_KEEPERS);
+        if joined || !was_eligible {
+            storage::reset_windows(&env);
+        }
 
         events::KeeperStaked {
             keeper,
@@ -516,6 +523,7 @@ impl SoroCron {
         info.unbonding_at = Some(withdrawable_at);
         storage::set_keeper(&env, &keeper, &info);
         storage::remove_active_keeper(&env, &keeper);
+        storage::reset_windows(&env);
 
         events::KeeperUnbonding {
             keeper,
@@ -634,7 +642,7 @@ impl SoroCron {
         config.paused = paused;
         storage::set_config(&env, &config);
         if !paused {
-            storage::set_registry_resumed(&env, env.ledger().timestamp());
+            storage::reset_windows(&env);
         }
         events::PausedSet { paused }.publish(&env);
     }
@@ -660,6 +668,8 @@ impl SoroCron {
         }
         config.min_stake = min_stake;
         storage::set_config(&env, &config);
+        // Who is eligible, and so who is assigned, may have changed.
+        storage::reset_windows(&env);
         events::MinStakeSet { min_stake }.publish(&env);
         Ok(())
     }
@@ -731,6 +741,7 @@ impl SoroCron {
         config.grace_period = grace_period;
         config.slash_bps = 0;
         storage::set_config(&env, &config);
+        storage::reset_windows(&env);
         events::KeeperWindowsSet { grace_period }.publish(&env);
         Ok(())
     }
@@ -1197,6 +1208,11 @@ fn run_job(
     let (spec, mut state) = storage::get_job_parts(env, job_id).ok_or(Error::JobNotFound)?;
     let now = env.ledger().timestamp();
     ensure_due(&spec, &state, now)?;
+    // Also checked at creation, but a job made before `set_executor` could
+    // aim at the executor's address.
+    if is_forbidden_target(env, config, &spec.target) {
+        return Err(Error::ForbiddenTarget);
+    }
     if storage::is_target_halted(env, &spec.target) {
         return Err(Error::TargetHalted);
     }
@@ -1288,9 +1304,11 @@ fn run_job(
 /// Whether the assigned keeper had its whole window for this run, so a miss
 /// really is its own. A resolver or a dependency can block a run without a
 /// trace, so those jobs never record misses. Otherwise the window counts
-/// from the latest of the run's due time and the last change that could
-/// have stopped the run: the owner pausing, funding, withdrawing or
-/// updating the job, the admin pausing the registry or halting the target.
+/// from the latest of the run's due time, the last change that could have
+/// stopped the run (the owner pausing, funding, withdrawing or updating the
+/// job, the admin pausing the registry or halting the target), and the last
+/// change in who is assigned (a keeper joining or leaving the rotation or
+/// becoming eligible, the admin changing windows or the minimum stake).
 fn had_whole_window(
     env: &Env,
     config: &Config,
@@ -1304,7 +1322,7 @@ fn had_whole_window(
     }
     let opened = due_at
         .max(storage::job_touched(env, job_id))
-        .max(storage::registry_resumed(env))
+        .max(storage::windows_reset(env))
         .max(storage::target_resumed(env, &spec.target));
     now >= opened.saturating_add(config.grace_period)
 }
