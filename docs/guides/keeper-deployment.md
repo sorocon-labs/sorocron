@@ -33,6 +33,7 @@ documents each one. The important ones:
 | `STELLAR_NETWORK`, `STELLAR_RPC_URL` | `testnet`, `mainnet` or `local`, and the RPC to use |
 | `STELLAR_RPC_URLS` | Several RPC endpoints, most preferred first; the keeper fails over between them |
 | `MAX_RESTORE_FEE_STROOPS` | Restore archived contract state when it costs at most this; off by default |
+| `MAX_COST_PER_JOB_STROOPS` | When jobs pay in a token other than XLM, the most network cost per job the keeper accepts |
 | `SOROCRON_CONTRACT_ID` | Registry address; defaults to `deployments/<network>.json` |
 | `BATCH_SIZE` | Jobs per transaction, up to 20 |
 | `FEE_PERCENTILE`, `MAX_INCLUSION_FEE` | Inclusion fee bidding |
@@ -40,7 +41,7 @@ documents each one. The important ones:
 | `METRICS_PORT` | Prometheus `/metrics` and `/healthz` |
 | `LOG_FORMAT=json` | Structured logs for your log pipeline |
 | `ALERT_WEBHOOK_URL`, `ALERT_FORMAT` | Discord, Slack or JSON alerts |
-| `TOPUP_STAKE_TO_XLM` | Stake back up to this amount after slashing |
+| `TOPUP_STAKE_TO_XLM` | Keep at least this much staked, for example after the admin raises the minimum |
 
 ## Key handling
 
@@ -55,8 +56,8 @@ after the unbonding period.
 - **One process per key.** Two keepers sharing a key race each other's
   sequence numbers. Scale out with different keys, or with more channels.
 - **Rotate by staking a new key first,** then `keeper unbond` the old one and
-  `keeper withdraw` once unbonding finishes. Slashing (if the registry has
-  assigned windows on) only applies while a key is in the rotation, so
+  `keeper withdraw` once unbonding finishes. A key left in the rotation
+  keeps being assigned windows, and misses are recorded against it, so
   unbond before shutting a keeper down for good.
 
 ## Option 1: Docker
@@ -125,8 +126,9 @@ ServiceMonitor). The metric list and ready-made Grafana queries are in the
 | Fee bid maxed | `sorocron_keeper_inclusion_fee_stroops >= MAX_INCLUSION_FEE` | Congestion beyond your ceiling |
 
 The webhook alerts (`ALERT_WEBHOOK_URL`) cover the same failures without a
-Prometheus stack, and add stake alerts: `low_stake` when one slash would
-disqualify the keeper, `keeper_ineligible` when it already has.
+Prometheus stack, and add stake alerts: `low_stake` when the stake is
+within 10% of the registry minimum, `keeper_ineligible` when the keeper
+can't execute any more.
 
 ## Running several keepers
 

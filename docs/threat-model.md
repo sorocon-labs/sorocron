@@ -11,7 +11,7 @@ the structured list auditors and reviewers can check item by item.
 |---|---|---|
 | **Job owner** | Untrusted toward others | Create, fund, update, pause and cancel their own jobs; choose any target, arguments, resolver, keeper allowlist and leader job |
 | **Keeper** | Untrusted, staked | Execute due jobs; stake, unbond, withdraw; choose which jobs to run and when to submit |
-| **Admin** | Trusted (should be a multisig) | Pause the registry, halt targets, set limits, protocol fee and slashing (capped at 10%), connect the executor once, announce upgrades that wait at least the unbonding time |
+| **Admin** | Trusted (should be a multisig) | Pause the registry, halt targets, set limits, the protocol fee (capped at 10%) and assigned windows, connect the executor once, announce upgrades that wait at least the unbonding time |
 | **Target contract** | Untrusted | Run arbitrary code when called by the executor |
 | **Resolver contract** | Untrusted | Answer `should_run`; run arbitrary code during that call |
 | **Anyone** | Untrusted | Fund any job, settle matured stakes, read everything |
@@ -70,10 +70,13 @@ never called by the registry itself, only by the executor, which owns nothing
 | D3 | Denial of service | A job with huge arguments makes execution exceed resource limits | `max_args` limit; split storage keeps per-run writes small; jobs over the limit simply can't run | Mitigated |
 | D4 | Denial of service | The admin pause traps funds | Exits (`cancel_job`, `withdraw_job_balance`, unbonding, `withdraw_stake(s)`) work while paused or halted | Mitigated |
 | D5 | Denial of service | Keeper entries or jobs get archived | TTLs are extended on every read and write; the TTL Guardian and self-extending pattern cover user contracts | Mitigated |
-| D6 | Denial of service | The fastest bot wins every run, so others stop keeping | Assigned keeper windows with slashing for missed windows | Mitigated when enabled (R3) |
+| D6 | Denial of service | The fastest bot wins every run, so others stop keeping | Assigned keeper windows; missed windows are recorded, never slashed | Mitigated when enabled (R3) |
 | D7 | Denial of service | An RPC provider withholds events, so keepers miss jobs | Keepers reload from scratch when the event cursor fails and every `RESYNC_EVERY_TICKS`; multiple keepers on different providers | Partially mitigated (R4) |
 | E1 | Elevation | A resolver or target re-enters the registry mid-run | Soroban forbids contract re-entry | Mitigated |
-| E2 | Elevation | Slashing drains more than the configured share | `slash_bps` capped at 10% of current stake; ineligible keepers are never assigned or slashed | Mitigated |
+| E2 | Elevation | A job owner who is also a keeper blocks a run through another keeper's assigned window (resolver, pause, drained balance, late allowlist change), then runs it to take that keeper's stake or blacken its record | Missed windows never move stake (since v5); misses only count when the window was whole: no resolver or dependency, and timed from the last owner or admin change. Covered by `test_security.rs` | Mitigated (reported Oct 2026) |
+| E4 | Elevation | A job's target asks for the executing keeper's (or a channel account's) authorization, for example to transfer its XLM, and the keeper signs what simulation recorded | Keepers sign only `registry.execute(_batch)` with nothing nested (`checkKeeperAuth` in the SDK, `check_auth` in `keeper-rs`); custom keepers must do the same. Covered by `test_security.rs` | Mitigated in the reference keepers (found in review, Oct 2026) |
+| D8 | Denial of service | A job that exhausts the compute budget, asks for the keeper's authorization or needs an unaffordable restore fails every batch it lands in | Keepers split failing batches to isolate the job and set it aside for 30 ticks | Mitigated in the reference keepers |
+| E5 | Elevation | The admin sets an enormous unbonding epoch so keepers who start unbonding never get their stake back | `set_unbonding_epoch` capped at 30 days | Mitigated |
 | E3 | Elevation | A chained job runs without its leader | `after` is checked inside the registry, not by an external contract; a missing leader blocks the follower | Mitigated |
 
 ## Open risks
