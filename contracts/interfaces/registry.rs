@@ -129,12 +129,11 @@ pub trait Contract {
         halted: bool,
     );
     fn set_upgrade_delay(env: soroban_sdk::Env, upgrade_delay: u64) -> Result<(), Error>;
-    fn set_keeper_windows(
+    fn set_keeper_windows(env: soroban_sdk::Env, grace_period: u64) -> Result<(), Error>;
+    fn set_unbonding_epoch(
         env: soroban_sdk::Env,
-        grace_period: u64,
-        slash_bps: u32,
+        unbonding_epoch: u64,
     ) -> Result<(), Error>;
-    fn set_unbonding_epoch(env: soroban_sdk::Env, unbonding_epoch: u64);
     fn withdraw_job_balance(
         env: soroban_sdk::Env,
         job_id: u64,
@@ -422,16 +421,6 @@ pub struct AdminProposed {
     pub current: soroban_sdk::Address,
     pub proposed: soroban_sdk::Address,
 }
-#[soroban_sdk::contractevent(topics = ["keeper_slashed"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct KeeperSlashed {
-    #[topic]
-    pub keeper: soroban_sdk::Address,
-    pub job_id: u64,
-    pub amount: i128,
-    pub remaining: i128,
-    pub beneficiary: soroban_sdk::Address,
-}
 #[soroban_sdk::contractevent(topics = ["target_halt_set"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct TargetHaltSet {
@@ -507,7 +496,6 @@ pub struct JobOwnerProposed {
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct KeeperWindowsSet {
     pub grace_period: u64,
-    pub slash_bps: u32,
 }
 #[soroban_sdk::contractevent(topics = ["upgrade_cancelled"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -518,6 +506,14 @@ pub struct UpgradeCancelled {
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct UnbondingEpochSet {
     pub unbonding_epoch: u64,
+}
+#[soroban_sdk::contractevent(topics = ["keeper_missed_window"])]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct KeeperMissedWindow {
+    #[topic]
+    pub keeper: soroban_sdk::Address,
+    pub job_id: u64,
+    pub ran_by: soroban_sdk::Address,
 }
 #[soroban_sdk::contractevent(topics = ["admin_proposal_cancelled"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]

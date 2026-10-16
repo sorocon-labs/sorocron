@@ -382,7 +382,7 @@ fn recent_misses_rise_with_a_missed_window_and_fade_with_good_runs() {
     let second = Address::generate(&s.env);
     s.sac.mint(&second, &INITIAL_BALANCE);
     s.cron.stake(&second, &MIN_STAKE);
-    s.cron.set_keeper_windows(&30, &0);
+    s.cron.set_keeper_windows(&30);
     let id = s.cron.create_job(&s.owner, &params(&s), &1_000);
     let assigned = s.cron.assigned_keeper(&id).unwrap();
     let other = if assigned == s.keeper {
@@ -399,7 +399,7 @@ fn recent_misses_rise_with_a_missed_window_and_fade_with_good_runs() {
     assert_eq!(s.cron.keeper_stats(&other).unwrap().recent_miss_bps, 0);
 
     // Eight good runs later most of it has faded; the lifetime count stays.
-    s.cron.set_keeper_windows(&0, &0);
+    s.cron.set_keeper_windows(&0);
     let mut expected = smooth(0, 10_000);
     for _ in 0..8 {
         run_late(&s, &assigned, id, 0);

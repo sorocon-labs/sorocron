@@ -127,7 +127,10 @@ export function Keeper() {
                         ["Recent misses", `${(keeperStats.recent_miss_bps ?? 0) / 100}%`],
                       ] as [string, string][])
                     : []),
-                  ["Slashed", `${formatAmount(keeper.slashed ?? 0n)} XLM`],
+                  // Only keepers slashed before v5 removed slashing.
+                  ...(keeper.slashed
+                    ? ([["Slashed before v5", `${formatAmount(keeper.slashed)} XLM`]] as [string, string][])
+                    : []),
                   ...(unbondingAt !== undefined
                     ? ([["Withdrawable", now >= unbondingAt ? "Now" : relative(unbondingAt, now)]] as [string, string][])
                     : []),

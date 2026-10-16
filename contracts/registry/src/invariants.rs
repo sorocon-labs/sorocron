@@ -4,10 +4,10 @@
 //! must always equal the sum of live job balances plus the stakes of
 //! registered keepers: every token that enters is escrowed for exactly one
 //! of them, and every token that leaves (fees, protocol fees, refunds,
-//! withdrawals, slashing rewards) is debited from exactly one of them.
+//! withdrawals) is debited from exactly one of them.
 //!
-//! Each case builds a registry with protocol fees, assigned windows and
-//! slashing all switched on, then applies a random sequence of creates,
+//! Each case builds a registry with protocol fees and assigned windows
+//! switched on, then applies a random sequence of creates,
 //! funding, withdrawals, cancellations, executions (single and batched,
 //! including failing targets), staking, unbonding, withdrawals and clock
 //! jumps. After every step the invariant is checked, and no call may fail
@@ -110,7 +110,7 @@ struct World {
     keepers: std::vec::Vec<Address>,
 }
 
-fn world(protocol_bps: u32, grace: u64, slash_bps: u32) -> World {
+fn world(protocol_bps: u32, grace: u64) -> World {
     // Thousands of throwaway environments: skip writing a JSON snapshot for each.
     let env = Env::new_with_config(EnvTestConfig {
         capture_snapshot_at_drop: false,
@@ -137,7 +137,7 @@ fn world(protocol_bps: u32, grace: u64, slash_bps: u32) -> World {
     cron.set_executor(&env.register(Executor, (cron_id.clone(),)));
     let treasury = Address::generate(&env);
     cron.set_protocol_fee(&protocol_bps, &Some(treasury));
-    cron.set_keeper_windows(&grace, &slash_bps);
+    cron.set_keeper_windows(&grace);
     cron.set_unbonding_epoch(&1_800);
 
     let owners: std::vec::Vec<Address> = (0..OWNERS).map(|_| Address::generate(&env)).collect();
@@ -301,10 +301,9 @@ proptest! {
     fn escrow_always_matches_job_balances_plus_stakes(
         protocol_bps in prop_oneof![Just(0u32), 1u32..=1_000],
         grace in prop_oneof![Just(0u64), 10u64..=60],
-        slash_bps in 0u32..=1_000,
         ops in prop::collection::vec(op(), 1..40),
     ) {
-        let w = world(protocol_bps, grace, slash_bps);
+        let w = world(protocol_bps, grace);
         // Start with every keeper staked so executions can happen.
         for k in &w.keepers {
             w.cron.stake(k, &MIN_STAKE);

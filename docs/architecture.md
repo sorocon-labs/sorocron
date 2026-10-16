@@ -37,12 +37,12 @@ sequenceDiagram
 
 | Key | Storage | Contents |
 |---|---|---|
-| `Config` | instance | admin, tokens, min stake, unbonding period and epoch, paused flag, executor, min interval, max args, protocol fee and treasury, max failures, grace period, slash share |
+| `Config` | instance | admin, tokens, min stake, unbonding period and epoch, paused flag, executor, min interval, max args, protocol fee and treasury, max failures, grace period, and `slash_bps` (unused since v5, always 0) |
 | `NextJobId` | instance | monotonically increasing job id counter |
 | `PendingAdmin` | instance | admin proposed via `propose_admin`, until accepted |
 | `Job(u64)` | persistent | `JobSpec`: owner, target, function, args, interval, schedule, fees, max_runs, end_at, resolver, keeper allowlist, leader job |
 | `JobState(u64)` | persistent | `JobState`: next_run, balance, runs, consecutive failures, active, leader's run count for chained jobs |
-| `Keeper(Address)` | persistent | stake, unbonding_at, executions, total lateness, missed windows, slashed stake |
+| `Keeper(Address)` | persistent | stake, unbonding_at, executions, total lateness, missed windows, stake slashed before v5 |
 | `ActiveKeepers` | persistent | keepers in the assigned-window rotation, in staking order (max 64) |
 | `HaltedTarget(Address)` | persistent | present while the admin has halted a target contract |
 
@@ -72,16 +72,17 @@ Time is measured with the ledger timestamp (seconds). Ledgers close about every 
 - `stake` registers a keeper, adds stake and puts it in the assigned-window rotation (up to 64 keepers; later keepers can still run any job after its window). A keeper may execute while `stake >= min_stake` and it is not unbonding.
 - `begin_unbonding` immediately removes execution rights, takes the keeper out of the rotation and starts the unbonding timer. With an `unbonding_epoch` set, the timer starts when the current epoch ends, so every keeper unbonding in one epoch is released at the same moment; `withdraw_stakes(keepers)` lets anyone settle a whole epoch in one transaction, paying each keeper its own stake.
 - `withdraw_stake` returns the full stake after the timer ends.
-- `keeper_stats(keeper)` returns executions, average lateness (seconds between a run becoming due and the keeper running it), missed windows and stake lost to slashing. Lateness is stored as a running sum, so the record stays a fixed size.
+- `keeper_stats(keeper)` returns executions, average lateness (seconds between a run becoming due and the keeper running it), missed windows, recent lateness and misses, and stake lost to slashing before v5 removed it. Lateness is stored as a running sum, so the record stays a fixed size.
 
-### Assigned windows and slashing
+### Assigned windows
 
-First come, first served makes the fastest bot win every fee and wastes everyone else's simulations. With `set_keeper_windows(grace_period, slash_bps)`:
+First come, first served makes the fastest bot win every fee and wastes everyone else's simulations. With `set_keeper_windows(grace_period)` (at most a day):
 
 1. Each run of each job has an assigned keeper, chosen by `sha256(job_id, runs) % n` over the job's keeper allowlist, or the rotation if it has none. `assigned_keeper(job_id)` shows it.
 2. For `grace_period` seconds after `next_run`, only the assigned keeper may execute (`NotAssignedKeeper` otherwise).
-3. After the window anyone may execute. If someone other than the assigned keeper does, the assigned keeper loses `slash_bps` (at most 10%) of its stake to the keeper that did the work, and its `missed` count goes up (`KeeperSlashed` event).
-4. An assigned keeper that can't execute (unbonding, or below `min_stake`, for example after being slashed) is skipped: the run is open to everyone and nobody is slashed for it.
+3. After the window anyone may execute. If someone other than the assigned keeper does, and the assigned keeper had its whole window, its `missed` count goes up (`KeeperMissedWindow` event). It never loses stake: see [missed windows](security.md#missed-windows) for why.
+4. A window only counts as whole if nothing outside the keeper's control could have stopped the run: jobs with a resolver or a dependency never record misses, and the window restarts whenever the owner pauses, resumes, funds, withdraws from or updates the job, or the admin unpauses the registry or un-halts the target.
+5. An assigned keeper that can't execute (unbonding, or below `min_stake`) is skipped: the run is open to everyone and no miss is recorded.
 
 `grace_period = 0` (the default) keeps first come, first served.
 
@@ -187,6 +188,6 @@ The test `guardian_job_keeps_target_contract_from_being_archived` runs this end 
 | 27 | `NotAssignedKeeper` | Inside the grace period only the run's assigned keeper may execute |
 | 28 | `TargetHalted` | The admin halted every job calling this target |
 | 29 | `InvalidCalendar` | Calendar hour, minute or weekday out of range, or a calendar with a non-zero interval |
-| 30 | `InvalidSetting` | Protocol fee or slash share above 10%, fee ceiling below the base fee, or a protocol fee without a treasury |
+| 30 | `InvalidSetting` | Protocol fee above 10%, fee ceiling below the base fee, an assigned window over a day, or a protocol fee without a treasury |
 | 31 | `TooManyKeepers` | Keeper allowlist longer than 10 |
 | 32 | `AwaitingDependency` | The job follows another job that hasn't run again since, or no longer exists |

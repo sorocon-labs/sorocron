@@ -18,6 +18,55 @@ const INSTANCE_THRESHOLD: u32 = INSTANCE_EXTEND_TO - DAY_IN_LEDGERS;
 const PERSISTENT_EXTEND_TO: u32 = 30 * DAY_IN_LEDGERS;
 const PERSISTENT_THRESHOLD: u32 = PERSISTENT_EXTEND_TO - DAY_IN_LEDGERS;
 
+/// When runs last became possible again, for missed-window bookkeeping.
+/// Each value only matters until one window (at most a day) has passed, so
+/// it lives in temporary storage for two days. An expired entry reads as 0,
+/// which gives the same answer, and temporary entries never need restoring.
+const TEMPORARY_EXTEND_TO: u32 = 2 * DAY_IN_LEDGERS;
+
+fn set_timestamp(env: &Env, key: &DataKey, at: u64) {
+    env.storage().temporary().set(key, &at);
+    env.storage()
+        .temporary()
+        .extend_ttl(key, TEMPORARY_EXTEND_TO, TEMPORARY_EXTEND_TO);
+}
+
+fn timestamp(env: &Env, key: &DataKey) -> u64 {
+    env.storage().temporary().get(key).unwrap_or(0)
+}
+
+/// Last time the owner (or a funder) changed something that can stop the
+/// job's run.
+pub fn job_touched(env: &Env, id: u64) -> u64 {
+    timestamp(env, &DataKey::JobTouched(id))
+}
+
+pub fn touch_job(env: &Env, id: u64, at: u64) {
+    set_timestamp(env, &DataKey::JobTouched(id), at);
+}
+
+/// Last time the admin un-halted `target`.
+pub fn target_resumed(env: &Env, target: &Address) -> u64 {
+    timestamp(env, &DataKey::TargetResumed(target.clone()))
+}
+
+pub fn set_target_resumed(env: &Env, target: &Address, at: u64) {
+    set_timestamp(env, &DataKey::TargetResumed(target.clone()), at);
+}
+
+/// Last time the admin unpaused the registry. Kept in instance storage,
+/// which lives as long as the contract.
+pub fn registry_resumed(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::RegistryResumed)
+        .unwrap_or(0)
+}
+
+pub fn set_registry_resumed(env: &Env, at: u64) {
+    env.storage().instance().set(&DataKey::RegistryResumed, &at);
+}
+
 fn extend_instance(env: &Env) {
     env.storage()
         .instance()

@@ -43,8 +43,9 @@ pub enum Error {
     TargetHalted = 28,
     /// Calendar hour, minute or weekday out of range, or set together with an interval.
     InvalidCalendar = 29,
-    /// A fee or slashing share above its maximum, a fee ceiling below the
-    /// base fee, or a protocol fee without a treasury.
+    /// A protocol fee above its maximum or without a treasury, a fee ceiling
+    /// below the base fee, an assigned window longer than a day, or an
+    /// unbonding epoch longer than 30 days.
     InvalidSetting = 30,
     /// Keeper allowlist longer than `MAX_JOB_KEEPERS`.
     TooManyKeepers = 31,

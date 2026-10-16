@@ -23,6 +23,8 @@ mod storage;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
+mod test_security;
+#[cfg(test)]
 mod test_v4;
 #[cfg(test)]
 mod test_v5;
@@ -59,8 +61,18 @@ pub const MAX_JOB_KEEPERS: u32 = 10;
 /// stake once it is full can still execute any run after its window.
 pub const MAX_ACTIVE_KEEPERS: u32 = 64;
 
-/// Upper bound for `protocol_fee_bps` and `slash_bps` (10%).
+/// Upper bound for `protocol_fee_bps` (10%).
 pub const MAX_BPS: u32 = 1_000;
+
+/// Longest assigned window, in seconds. The bookkeeping that decides whether
+/// a miss counts lives in temporary storage for two days, so windows must
+/// end well within that.
+pub const MAX_GRACE_PERIOD: u64 = 86_400;
+
+/// Longest unbonding epoch, in seconds (30 days). Without a cap the admin
+/// could set an epoch so long that keepers who start unbonding never get
+/// their stake back.
+pub const MAX_UNBONDING_EPOCH: u64 = 30 * 86_400;
 
 /// 100% in basis points: a missed window's sample in `recent_miss_bps`.
 const MAX_BPS_SCALE: u64 = 10_000;
@@ -214,6 +226,7 @@ impl SoroCron {
         }
         storage::set_spec(&env, job_id, &spec);
         storage::set_state(&env, job_id, &state);
+        touch(&env, &config, job_id);
 
         events::JobUpdated {
             job_id,
@@ -244,6 +257,7 @@ impl SoroCron {
         );
         state.balance += amount;
         storage::set_state(&env, job_id, &state);
+        touch(&env, &config, job_id);
 
         events::JobFunded {
             job_id,
@@ -294,6 +308,7 @@ impl SoroCron {
 
         state.balance -= amount;
         storage::set_state(&env, job_id, &state);
+        touch(&env, &config, job_id);
         token::TokenClient::new(&env, &config.fee_token).transfer(
             &env.current_contract_address(),
             &spec.owner,
@@ -313,6 +328,7 @@ impl SoroCron {
     /// balance and schedule but can't be executed; funding and cancelling
     /// still work. Resuming clears the failure count. Owner only.
     pub fn set_job_active(env: Env, job_id: u64, active: bool) -> Result<(), Error> {
+        let config = storage::load_config(&env);
         let (spec, mut state) = storage::get_job_parts(&env, job_id).ok_or(Error::JobNotFound)?;
         spec.owner.require_auth();
 
@@ -321,6 +337,7 @@ impl SoroCron {
             state.failures = 0;
         }
         storage::set_state(&env, job_id, &state);
+        touch(&env, &config, job_id);
 
         events::JobActiveSet { job_id, active }.publish(&env);
         Ok(())
@@ -601,6 +618,9 @@ impl SoroCron {
         config.admin.require_auth();
         config.paused = paused;
         storage::set_config(&env, &config);
+        if !paused {
+            storage::set_registry_resumed(&env, env.ledger().timestamp());
+        }
         events::PausedSet { paused }.publish(&env);
     }
 
@@ -611,6 +631,9 @@ impl SoroCron {
         let config = storage::load_config(&env);
         config.admin.require_auth();
         storage::set_target_halted(&env, &target, halted);
+        if !halted {
+            storage::set_target_resumed(&env, &target, env.ledger().timestamp());
+        }
         events::TargetHaltSet { target, halted }.publish(&env);
     }
 
@@ -676,36 +699,39 @@ impl SoroCron {
         events::MaxFailuresSet { max_failures }.publish(&env);
     }
 
-    /// Turns on assigned keeper windows: for `grace_period` seconds after a
-    /// run is due only its assigned keeper may execute it, and if another
-    /// keeper has to run it afterwards the assigned keeper loses `slash_bps`
-    /// (at most `MAX_BPS`) of its stake to that keeper. `grace_period = 0`
-    /// returns to first come, first served.
-    pub fn set_keeper_windows(env: Env, grace_period: u64, slash_bps: u32) -> Result<(), Error> {
+    /// Turns on assigned keeper windows: for `grace_period` seconds (at most
+    /// `MAX_GRACE_PERIOD`) after a run is due only its assigned keeper may
+    /// execute it; after that anyone may. A keeper that had its whole window
+    /// and let it pass gets the miss recorded in `keeper_stats`. Missing a
+    /// window never costs stake: whether a run was possible depends on things
+    /// the job's owner controls, so a miss proves nothing about the keeper.
+    /// `grace_period = 0` returns to first come, first served.
+    pub fn set_keeper_windows(env: Env, grace_period: u64) -> Result<(), Error> {
         let mut config = storage::load_config(&env);
         config.admin.require_auth();
-        if slash_bps > MAX_BPS {
+        if grace_period > MAX_GRACE_PERIOD {
             return Err(Error::InvalidSetting);
         }
         config.grace_period = grace_period;
-        config.slash_bps = slash_bps;
+        config.slash_bps = 0;
         storage::set_config(&env, &config);
-        events::KeeperWindowsSet {
-            grace_period,
-            slash_bps,
-        }
-        .publish(&env);
+        events::KeeperWindowsSet { grace_period }.publish(&env);
         Ok(())
     }
 
-    /// Groups unbonding into epochs of this many seconds. `0` disables epochs.
-    pub fn set_unbonding_epoch(env: Env, unbonding_epoch: u64) {
+    /// Groups unbonding into epochs of this many seconds, at most
+    /// `MAX_UNBONDING_EPOCH`. `0` disables epochs.
+    pub fn set_unbonding_epoch(env: Env, unbonding_epoch: u64) -> Result<(), Error> {
         let mut config = storage::load_config(&env);
         config.admin.require_auth();
+        if unbonding_epoch > MAX_UNBONDING_EPOCH {
+            return Err(Error::InvalidSetting);
+        }
         config.unbonding_epoch = unbonding_epoch;
         storage::set_config(&env, &config);
         push_back_pending_upgrade(&env, &config);
         events::UnbondingEpochSet { unbonding_epoch }.publish(&env);
+        Ok(())
     }
 
     /// Announces new registry code. `apply_upgrade` installs it once
@@ -813,7 +839,7 @@ impl SoroCron {
     }
 
     /// Reputation summary for a keeper: executions, average lateness, missed
-    /// windows and stake lost to slashing.
+    /// windows, and stake lost to slashing before v5 removed it.
     pub fn keeper_stats(env: Env, keeper: Address) -> Option<KeeperStats> {
         let config = storage::load_config(&env);
         let info = storage::get_keeper(&env, &keeper)?;
@@ -1098,12 +1124,8 @@ struct Payout {
     keeper_fees: i128,
     /// Fee-token amount for the treasury.
     protocol_fees: i128,
-    /// Stake-token amount slashed from keepers that missed their windows.
-    slash_rewards: i128,
 }
 
-/// Checks the registry state and keeper shared by `execute` and
-/// `execute_batch`, returning the executor and the keeper's record.
 /// The executing keeper's stored record and recent stats, loaded once per
 /// transaction and saved once at the end however many jobs it runs.
 struct KeeperRecord {
@@ -1125,6 +1147,8 @@ impl KeeperRecord {
     }
 }
 
+/// Checks the registry state and keeper shared by `execute` and
+/// `execute_batch`, returning the executor and the keeper's record.
 fn authorize_keeper(
     env: &Env,
     config: &Config,
@@ -1182,7 +1206,8 @@ fn run_job(
 
     let fee = ramped_fee(&spec, &state, now);
     let (keeper_fee, protocol_fee) = split_fee(fee, config.protocol_fee_bps);
-    let lateness = now.saturating_sub(state.next_run);
+    let due_at = state.next_run;
+    let lateness = now.saturating_sub(due_at);
 
     state.runs = state.runs.saturating_add(1);
     state.leader_runs = leader_runs;
@@ -1216,7 +1241,9 @@ fn run_job(
     record.recent.lateness = smooth(record.recent.lateness, lateness);
     record.recent.misses = smooth(record.recent.misses, 0);
     if let Some(missed) = assigned {
-        payout.slash_rewards += slash_missed_keeper(env, config, &missed, keeper, job_id);
+        if had_whole_window(env, config, job_id, &spec, due_at, now) {
+            record_miss(env, &missed, keeper, job_id);
+        }
     }
     payout.keeper_fees += keeper_fee;
     payout.protocol_fees += protocol_fee;
@@ -1237,35 +1264,55 @@ fn run_job(
     Ok(())
 }
 
-/// Takes `slash_bps` of a keeper's stake for a run it was assigned but
-/// missed. Returns the amount, which goes to the keeper that ran the job.
-fn slash_missed_keeper(
+/// Whether the assigned keeper had its whole window for this run, so a miss
+/// really is its own. A resolver or a dependency can block a run without a
+/// trace, so those jobs never record misses. Otherwise the window counts
+/// from the latest of the run's due time and the last change that could
+/// have stopped the run: the owner pausing, funding, withdrawing or
+/// updating the job, the admin pausing the registry or halting the target.
+fn had_whole_window(
     env: &Env,
     config: &Config,
-    missed: &Address,
-    beneficiary: &Address,
     job_id: u64,
-) -> i128 {
+    spec: &JobSpec,
+    due_at: u64,
+    now: u64,
+) -> bool {
+    if spec.resolver.is_some() || spec.after.is_some() {
+        return false;
+    }
+    let opened = due_at
+        .max(storage::job_touched(env, job_id))
+        .max(storage::registry_resumed(env))
+        .max(storage::target_resumed(env, &spec.target));
+    now >= opened.saturating_add(config.grace_period)
+}
+
+/// Records that `missed` let its whole window pass and `ran_by` ran the job.
+/// A miss only affects the keeper's stats; it never moves stake.
+fn record_miss(env: &Env, missed: &Address, ran_by: &Address, job_id: u64) {
     let Some(mut info) = storage::get_keeper(env, missed) else {
-        return 0;
+        return;
     };
-    let amount = split_fee(info.stake, config.slash_bps).1;
-    info.stake -= amount;
-    info.slashed += amount;
     info.missed = info.missed.saturating_add(1);
     storage::set_keeper(env, missed, &info);
     let mut recent = storage::get_keeper_recent(env, missed);
     recent.misses = smooth(recent.misses, MAX_BPS_SCALE);
     storage::set_keeper_recent(env, missed, &recent);
-    events::KeeperSlashed {
+    events::KeeperMissedWindow {
         keeper: missed.clone(),
         job_id,
-        amount,
-        remaining: info.stake,
-        beneficiary: beneficiary.clone(),
+        ran_by: ran_by.clone(),
     }
     .publish(env);
-    amount
+}
+
+/// Notes that something that can stop a job's run just changed, so its
+/// assigned keeper's window restarts (see `had_whole_window`).
+fn touch(env: &Env, config: &Config, job_id: u64) {
+    if config.grace_period > 0 {
+        storage::touch_job(env, job_id, env.ledger().timestamp());
+    }
 }
 
 /// Pays out a keeper's earnings and the treasury's share.
@@ -1287,19 +1334,12 @@ fn settle(env: &Env, config: &Config, keeper: &Address, payout: &Payout) {
             );
         }
     }
-    if payout.slash_rewards > 0 {
-        token::TokenClient::new(env, &config.stake_token).transfer(
-            &registry,
-            keeper,
-            &payout.slash_rewards,
-        );
-    }
 }
 
 /// The keeper reserved for the job's next run: chosen deterministically from
 /// the job's allowlist (or the window rotation) by `sha256(job_id, runs)`.
 /// `None` when windows are off or the chosen keeper can't execute, in which
-/// case the run is open to everyone and nobody is slashed.
+/// case the run is open to everyone and no miss is recorded.
 fn assigned_keeper_for(
     env: &Env,
     config: &Config,
