@@ -28,7 +28,8 @@ cargo run --release -- --dry-run --once # simulate only, never send
 Before signing, it checks the transaction authorizes nothing but
 `registry.execute_batch`: a job's target that asks for the keeper's own
 authorization is refused. A batch that fails because of one job is retried
-job by job, and that job sits out 30 ticks.
+job by job, and that job sits out 30 ticks. A batch that costs more than it earns is
+split in halves, so one expensive job doesn't hold back cheap ones.
 
 Each tick it reads `job_count`, checks `is_due` for every job, and runs the
 due jobs in `execute_batch` transactions of up to `BATCH_SIZE`. Each batch is

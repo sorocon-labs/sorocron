@@ -5,9 +5,13 @@
  * Each batch of up to `batchSize` jobs is simulated first with
  * `execute_batch`, which reports exactly which jobs would run (resolvers,
  * dependencies and assigned keeper windows included) and what the
- * transaction costs. Batches where nothing would run, or that would cost
- * more than they earn, are not sent. Batches go out in parallel, one per
- * free channel account (see channels.ts).
+ * transaction costs. Batches where nothing would run are not sent, and
+ * batches that would cost more than they earn are split so an expensive job
+ * doesn't hold back cheap ones. Batches go out in parallel, one per free
+ * channel account (see channels.ts).
+ *
+ * With `dryRun` nothing is restored, signed or sent: the tick logs what it
+ * would execute, with expected earnings and costs (#113).
  *
  * Typed against narrow interfaces rather than the SDK client so it can be
  * tested with fakes.
@@ -61,6 +65,8 @@ export interface TickDeps {
   maxCostPerJob?: bigint;
   /** Jobs set aside after failing on their own; see quarantine.ts. */
   quarantine?: Quarantine;
+  /** Simulate only: log what would run and never restore, sign or send. */
+  dryRun?: boolean;
 }
 
 /** What one tick did, for metrics. Every due job lands in exactly one bucket. */
@@ -81,6 +87,8 @@ export interface TickSummary {
   restoreFeeStroops: bigint;
   /** Due jobs set aside this tick or still sitting out (counted in `skipped` too). */
   quarantined: number;
+  /** Runnable and worth sending, but not sent because of `dryRun`. */
+  dryRun: number;
 }
 
 /** A failure that belongs to one job in the batch, not to the registry or network. */
@@ -117,6 +125,7 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
     restores: 0,
     restoreFeeStroops: 0n,
     quarantined: allDue.length - due.length,
+    dryRun: 0,
   };
   const link = (hash: string) => (hash && deps.explorer ? ` ${deps.explorer}/tx/${hash}` : "");
 
@@ -132,6 +141,7 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
       const max = deps.maxRestoreFee ?? 0n;
       if (max === 0n) throw new JobProblem(`archived state needs a restore (~${err.fee} stroops); set MAX_RESTORE_FEE_STROOPS to allow it`);
       if (err.fee > max) throw new JobProblem(`archived state needs a restore (~${err.fee} stroops), above MAX_RESTORE_FEE_STROOPS (${max})`);
+      if (deps.dryRun) throw new Error(`would restore archived state first (~${err.fee} stroops)`);
       const { hash } = await err.restore();
       summary.restores += 1;
       summary.restoreFeeStroops += err.fee;
@@ -146,7 +156,8 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
   /**
    * Simulates and sends one batch. A batch that fails because of one of its
    * jobs is split in half until that job is alone, so it can't hold up the
-   * others; the job is then quarantined.
+   * others; the job is then quarantined. An unprofitable batch is split the
+   * same way, so jobs that pay for themselves still run.
    */
   const runBatch = async (client: BatchClient, batch: { id: bigint; feePerRun: bigint }[]): Promise<void> => {
     const ids = batch.map((j) => j.id);
@@ -179,15 +190,29 @@ export async function tick(deps: TickDeps, now: bigint): Promise<TickSummary> {
 
     const earned = runnable.reduce((sum, j) => sum + j.feePerRun, 0n);
     const cost = prepared.resourceFee + BigInt(client.inclusionFee ?? 0);
+    const runLabel = `jobs ${runnable.map((j) => j.id).join(",")}`;
+    let refusal: string | undefined;
     if (deps.feeIsNative) {
-      if (earned - cost < (deps.minProfitStroops ?? 0n)) {
-        deps.log(`${label}: unprofitable (earns ${earned}, costs ~${cost} stroops)`);
-        summary.unprofitable += runnable.length;
+      if (earned - cost < (deps.minProfitStroops ?? 0n)) refusal = `unprofitable (earns ${earned}, costs ~${cost} stroops)`;
+    } else if (deps.maxCostPerJob && cost > deps.maxCostPerJob * BigInt(runnable.length)) {
+      refusal = `too costly (~${cost} stroops for ${runnable.length} job(s), above MAX_COST_PER_JOB_STROOPS)`;
+    }
+    if (refusal) {
+      // One expensive job can sink a batch of cheap ones: try them in halves.
+      if (runnable.length > 1) {
+        const half = Math.ceil(runnable.length / 2);
+        await runBatch(client, runnable.slice(0, half));
+        await runBatch(client, runnable.slice(half));
         return;
       }
-    } else if (deps.maxCostPerJob && cost > deps.maxCostPerJob * BigInt(runnable.length)) {
-      deps.log(`${label}: too costly (~${cost} stroops for ${runnable.length} job(s), above MAX_COST_PER_JOB_STROOPS)`);
-      summary.unprofitable += runnable.length;
+      deps.log(`${runLabel}: ${refusal}`);
+      summary.unprofitable += 1;
+      return;
+    }
+
+    if (deps.dryRun) {
+      deps.log(`${runLabel}: would execute (earns ${earned}, costs ~${cost} stroops)`);
+      summary.dryRun += runnable.length;
       return;
     }
 

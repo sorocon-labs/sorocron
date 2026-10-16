@@ -1,0 +1,85 @@
+# Prometheus alert rules for SoroCron keepers (#135).
+#
+# Matches the monitoring table in docs/guides/keeper-deployment.md. Load it
+# from prometheus.yml:
+#
+#   rule_files:
+#     - /etc/prometheus/sorocron-alerts.yml
+#
+# CI runs `promtool check rules` on this file. Rules group by `instance`, so
+# each keeper alerts on its own; thresholds are the guide's defaults.
+groups:
+  - name: sorocron-keeper
+    rules:
+      - alert: SoroCronKeeperStalled
+        expr: time() - sorocron_keeper_last_tick_timestamp_seconds > 60
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Keeper {{ $labels.instance }} hasn't finished a tick for over a minute"
+          description: "The RPC may be down, the keeper may have crashed, or it may be out of XLM. Check its logs and /healthz."
+
+      - alert: SoroCronKeeperTickErrors
+        expr: increase(sorocron_keeper_tick_errors_total[10m]) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Keeper {{ $labels.instance }} had {{ $value | humanize }} failed ticks in 10 minutes"
+          description: "Ticks are throwing before they finish, usually because RPC calls fail."
+
+      - alert: SoroCronKeeperSendsFailing
+        expr: |
+          sum by (instance) (rate(sorocron_keeper_jobs_total{outcome="failed"}[15m]))
+            / clamp_min(sum by (instance) (rate(sorocron_keeper_jobs_total[15m])), 1e-9)
+            > 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 20% of keeper {{ $labels.instance }}'s runs fail to send"
+          description: "Fee bids may be too low, another keeper may be winning the runs, or the RPC is struggling."
+
+      - alert: SoroCronKeeperLowBalance
+        expr: min by (instance, account) (sorocron_keeper_balance_stroops) / 1e7 < 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.account }} has {{ $value | humanize }} XLM left"
+          description: "Fund the keeper or channel account before its sends start failing."
+
+      - alert: SoroCronKeeperFeeBidMaxed
+        expr: sorocron_keeper_inclusion_fee_stroops >= sorocron_keeper_max_inclusion_fee_stroops
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Keeper {{ $labels.instance }} is bidding its maximum inclusion fee"
+          description: "The network is more congested than MAX_INCLUSION_FEE allows for; raise it or accept slower runs."
+
+      - alert: SoroCronKeeperRpcEndpointDown
+        expr: sorocron_keeper_rpc_up == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RPC endpoint {{ $labels.endpoint }} isn't answering keeper {{ $labels.instance }}"
+          description: "The keeper has failed over to another endpoint if it has one. Check the provider."
+
+      - alert: SoroCronKeeperJobsQuarantined
+        expr: sorocron_keeper_jobs_quarantined > 0
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Keeper {{ $labels.instance }} is setting aside {{ $value }} job(s)"
+          description: "These jobs fail on their own (budget, a request for the keeper's authorization, or an unaffordable restore). The keeper's logs name them."
+
+      - alert: SoroCronRegistryUpgradeAnnounced
+        expr: sorocron_keeper_upgrade_available_at_seconds > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "A registry upgrade was announced"
+          description: "It can be applied from {{ $value | humanizeTimestamp }}. Unbond before then if you don't want to run under the new code."
