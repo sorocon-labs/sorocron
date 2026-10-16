@@ -33,11 +33,16 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 
 - **Fee suggestions**: `suggestFee` (and `cron.suggestFee`) in the SDK simulates a job's call, adds the registry's measured overhead and the recent p90 inclusion fee, and suggests a fee with a 50% margin. The New Job form shows it with a one-click "use this" and warns when the chosen fee is below what a keeper pays; `sorocron jobs create` prints it and warns too. ([#138](https://github.com/sorocon-labs/sorocron/issues/138))
 
+- **Dashboard handovers and upgrade notices**: a job's owner can offer it to another account from the job page (Transfer), see the pending offer and withdraw it; the account it's offered to gets an Accept prompt on the job and a "Waiting for you to accept" list on My jobs. While the admin has announced a registry upgrade, every page shows its code hash and a countdown to when it can be applied, and the Registry page lists the upgrade delay. The SDK adds `handoversTo(address)`, `offersTo`, and server-side topic filters for `fetchEvents` (`topics`, `topicFilter`). ([#131](https://github.com/sorocon-labs/sorocron/issues/131))
+
 ### Fixed
+- `fetchEvents` no longer fails when it clamps a start ledger to the RPC server's retention window just as that window moves on; it starts a minute inside it.
+- Dialogs no longer add a second page banner for screen readers: their header was a `<header>` outside `<main>`.
 - The keeper splits a batch that costs more than it earns instead of skipping all of it, so one expensive job no longer holds back cheap ones.
 - The dashboard's Attention filter now includes failing jobs, which were only listed under All.
 
 ### Changed
+- The testnet registry was upgraded in place from v4 to v5 on 2026-10-16 (WASM `11f15741…2872`), keeping its address, jobs and keeper stake; rehearsed first against the deployed v4 WASM.
 - Debug builds compile dependencies without debug info and the workspace with line tables only: the registry's test build drops from 1.9 GB to 0.9 GB.
 
 ### Interface

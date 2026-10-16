@@ -13,7 +13,7 @@ import { contract, rpc } from "@stellar/stellar-sdk";
 import { checkKeeperAuth } from "./auth.js";
 import { RestoreRequiredError, SoroCronError, parseContractError } from "./errors.js";
 import type { NetworkConfig } from "./networks.js";
-import { fetchEvents, toExecution, type EventPage, type Execution, type FetchEventsOptions } from "./events.js";
+import { fetchEvents, offersTo, toExecution, topicFilter, type EventPage, type Execution, type FetchEventsOptions } from "./events.js";
 import type { Config, Job, JobParams, JobState, JobUpdate, Keeper, KeeperStats, PendingUpgrade } from "./types.js";
 import { suggestFee, type FeeSuggestion, type JobCall, type SuggestFeeOptions } from "./fees.js";
 
@@ -189,6 +189,27 @@ export class SoroCron {
   /** Account proposed as the job's new owner that hasn't accepted yet (v5+). */
   pendingJobOwner(jobId: bigint): Promise<string | undefined> {
     return this.read("pending_job_owner", { job_id: jobId });
+  }
+
+  /**
+   * Jobs offered to `address` with `propose_job_owner` that it hasn't
+   * accepted yet (v5+). Finds offers in the RPC server's retained events
+   * and confirms each with `pending_job_owner`, so
+   * withdrawn and accepted offers drop out. Older offers are only found by
+   * asking `pendingJobOwner` for the job directly.
+   */
+  async handoversTo(address: string): Promise<bigint[]> {
+    const latest = (await this.server.getLatestLedger()).sequence;
+    const page = await this.events({
+      startLedger: Math.max(1, latest - 7 * 17_280),
+      topics: [topicFilter("job_owner_proposed", 1)],
+      limit: 1_000,
+    });
+    const offered = offersTo(page.events, address);
+    const confirmed = await Promise.all(
+      offered.map(async (id) => ((await this.pendingJobOwner(id).catch(() => undefined)) === address ? id : undefined)),
+    );
+    return confirmed.filter((id): id is bigint => id !== undefined);
   }
 
   /** Code upgrade the admin has announced, if any (v5+). */

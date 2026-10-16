@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { SoroCron, TESTNET, type Config, type Job, type Keeper, type KeeperStats } from "@sorocron/sdk";
+import { SoroCron, TESTNET, type Config, type Job, type Keeper, type KeeperStats, type PendingUpgrade } from "@sorocron/sdk";
 import { signTransaction } from "@stellar/freighter-api";
 
 export const NETWORK = TESTNET;
@@ -17,6 +17,15 @@ export interface RegistryState {
   keeper?: Keeper | null;
   /** The connected keeper's reputation summary, when it is one. */
   keeperStats?: KeeperStats;
+  /** Code upgrade the admin has announced (v5+). */
+  pendingUpgrade?: PendingUpgrade;
+  /** Seconds an announced upgrade waits (v5+). */
+  upgradeDelay?: bigint;
+  /**
+   * Pending job handovers the connected account is part of: its own jobs
+   * offered to someone else, and jobs offered to it. Job id to new owner.
+   */
+  handovers: Map<bigint, string>;
   loading: boolean;
   error?: string;
   updatedAt?: number;
@@ -36,6 +45,9 @@ export function RegistryProvider({ account, children }: { account?: string; chil
   const [jobs, setJobs] = useState<Job[]>([]);
   const [keeper, setKeeper] = useState<Keeper | null>();
   const [keeperStats, setKeeperStats] = useState<KeeperStats>();
+  const [pendingUpgrade, setPendingUpgrade] = useState<PendingUpgrade>();
+  const [upgradeDelay, setUpgradeDelay] = useState<bigint>();
+  const [handovers, setHandovers] = useState<Map<bigint, string>>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [updatedAt, setUpdatedAt] = useState<number>();
@@ -66,6 +78,22 @@ export function RegistryProvider({ account, children }: { account?: string; chil
         account ? cron.getKeeper(account) : Promise.resolve(undefined),
         account ? cron.keeperStats(account).catch(() => undefined) : Promise.resolve(undefined),
       ]);
+      // Upgrade announcements and job handovers arrived in v5.
+      if (nextVersion >= 5) {
+        const owned = account ? nextJobs.filter((j) => j.owner === account) : [];
+        const [upgrade, delay, outgoing, incoming] = await Promise.all([
+          cron.pendingUpgrade().catch(() => undefined),
+          cron.upgradeDelay().catch(() => undefined),
+          Promise.all(owned.map(async (j) => [j.id, await cron.pendingJobOwner(j.id).catch(() => undefined)] as const)),
+          account ? cron.handoversTo(account).catch(() => [] as bigint[]) : Promise.resolve([] as bigint[]),
+        ]);
+        const next = new Map<bigint, string>();
+        for (const [id, to] of outgoing) if (to) next.set(id, to);
+        for (const id of incoming) next.set(id, account!);
+        setPendingUpgrade(upgrade ?? undefined);
+        setUpgradeDelay(delay);
+        setHandovers(next);
+      }
       setConfig(nextConfig);
       setJobs(nextJobs);
       setVersion(nextVersion);
@@ -89,7 +117,9 @@ export function RegistryProvider({ account, children }: { account?: string; chil
   }, [cron, refresh]);
 
   return (
-    <RegistryContext.Provider value={{ cron, config, version, jobs, keeper, keeperStats, loading, error, updatedAt, refresh }}>
+    <RegistryContext.Provider
+      value={{ cron, config, version, jobs, keeper, keeperStats, pendingUpgrade, upgradeDelay, handovers, loading, error, updatedAt, refresh }}
+    >
       {children}
     </RegistryContext.Provider>
   );

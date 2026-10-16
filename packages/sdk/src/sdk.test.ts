@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { scValToNative } from "@stellar/stellar-sdk";
+import { scValToNative, xdr } from "@stellar/stellar-sdk";
 import {
   ERRORS,
   currentFee,
   describeSchedule,
+  fetchEvents,
   leaderboard,
+  offersTo,
   schedule,
   toExecution,
+  topicFilter,
   SoroCronError,
   arg,
   depositFor,
@@ -187,5 +190,53 @@ describe("events", () => {
     );
     expect(rows.map((r) => r.keeper)).toEqual(["GB", "GC", "GA"]);
     expect(rows[0]).toMatchObject({ runs: 2, failedRuns: 1, earned: 135n, averageLateness: 3n });
+  });
+
+  it("finds jobs offered to an account, newest offer per job", () => {
+    const offer = (job: bigint, proposed: string, id: string) => ({
+      name: "job_owner_proposed",
+      topics: [job],
+      data: { owner: "GOWNER", proposed },
+      ledger: 5,
+      closedAt: "2026-10-07T00:00:00Z",
+      txHash: "abc",
+      id,
+    });
+    const events = [
+      offer(1n, "GNEW", "1"),
+      offer(2n, "GNEW", "2"),
+      // Job 2's owner withdrew the offer by proposing themselves.
+      offer(2n, "GOWNER", "3"),
+      offer(3n, "GOTHER", "4"),
+      { ...offer(4n, "GNEW", "5"), name: "job_owner_changed" },
+    ];
+    expect(offersTo(events, "GNEW")).toEqual([1n]);
+    expect(offersTo(events, "GOTHER")).toEqual([3n]);
+  });
+
+  it("clamps the start to the server's window, with room for it to move", async () => {
+    const calls: { startLedger?: number; topics?: unknown }[] = [];
+    const server = {
+      async getEvents(req: { startLedger?: number; filters: { topics?: unknown }[] }) {
+        calls.push({ startLedger: req.startLedger, topics: req.filters[0].topics });
+        if (req.startLedger! < 5_214_911) {
+          throw { code: -32600, message: "startLedger must be within the ledger range: 5214911 - 5220979" };
+        }
+        return { events: [], latestLedger: 5_220_979, cursor: "c" };
+      },
+    };
+    const topics = [topicFilter("job_owner_proposed", 1)];
+    const page = await fetchEvents(server as never, "CREG", { startLedger: 5_100_000, topics });
+    expect(calls).toEqual([
+      { startLedger: 5_100_000, topics },
+      { startLedger: 5_214_923, topics },
+    ]);
+    expect(page).toEqual({ events: [], latestLedger: 5_220_979, cursor: "c" });
+  });
+
+  it("builds server-side topic filters", () => {
+    const [name, ...rest] = topicFilter("job_owner_proposed", 1);
+    expect(scValToNative(xdr.ScVal.fromXDR(name, "base64"))).toBe("job_owner_proposed");
+    expect(rest).toEqual(["*"]);
   });
 });

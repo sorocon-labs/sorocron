@@ -23,6 +23,15 @@ for (const job of await cron.allJobs()) {
 
 Reads need no wallet. `isDue(id)` is the authoritative check (it runs the job's resolver on-chain); `jobStatus` is a free local approximation.
 
+On v5 registries, `pendingUpgrade()` returns an upgrade the admin has announced and when it can be applied, and `handoversTo(address)` lists jobs offered to an account that it hasn't accepted yet:
+
+```ts
+const upgrade = await cron.pendingUpgrade();       // undefined, or { wasm_hash, proposed_at, available_at }
+const offered = await cron.handoversTo(myAddress); // job ids; accept with cron.acceptJobOwner(id)
+```
+
+`events()` takes server-side topic filters, so a busy registry's other events don't fill the page: `cron.events({ topics: [topicFilter("job_executed", 2)] })`.
+
 ## Schedule a job
 
 Pass the signing account and a signer. Freighter's `signTransaction` works as is; in Node use `contract.basicNodeSigner(keypair, passphrase).signTransaction`.
