@@ -35,6 +35,8 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 
 - **Dashboard handovers and upgrade notices**: a job's owner can offer it to another account from the job page (Transfer), see the pending offer and withdraw it; the account it's offered to gets an Accept prompt on the job and a "Waiting for you to accept" list on My jobs. While the admin has announced a registry upgrade, every page shows its code hash and a countdown to when it can be applied, and the Registry page lists the upgrade delay. The SDK adds `handoversTo(address)`, `offersTo`, and server-side topic filters for `fetchEvents` (`topics`, `topicFilter`). ([#131](https://github.com/sorocon-labs/sorocron/issues/131))
 
+- **Typed registry events**: `decodeEvent` in the SDK decodes all 32 registry events into a discriminated union (`TypedRegistryEvent`) with camelCase, correctly typed fields, generated from the contract interface by `scripts/gen-events.py`. A test fails when the contract declares an event or field the SDK can't decode, and the keeper's job index now reads typed events. ([#134](https://github.com/sorocon-labs/sorocron/issues/134))
+
 ### Fixed
 - `fetchEvents` no longer fails when it clamps a start ledger to the RPC server's retention window just as that window moves on; it starts a minute inside it.
 - Dialogs no longer add a second page banner for screen readers: their header was a `<header>` outside `<main>`.

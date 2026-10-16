@@ -49,6 +49,8 @@ case "${1:-}" in
       echo "$n $(file_size "$wasm")" >>"$sizes"
     done
     echo "Wrote ${#wasms[@]} interfaces to contracts/interfaces and sizes to contracts/wasm-sizes.txt."
+    # The SDK's typed event decoders follow the registry's interface (#134).
+    if command -v python3 >/dev/null 2>&1; then python3 scripts/gen-events.py; else python scripts/gen-events.py; fi
     ;;
 
   --check)

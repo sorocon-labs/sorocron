@@ -32,6 +32,29 @@ const offered = await cron.handoversTo(myAddress); // job ids; accept with cron.
 
 `events()` takes server-side topic filters, so a busy registry's other events don't fill the page: `cron.events({ topics: [topicFilter("job_executed", 2)] })`.
 
+## Typed events
+
+`decodeEvent` turns any registry event into a typed object, discriminated by `type`, with camelCase fields: amounts and ids as `bigint`, addresses as strings, hashes as `Uint8Array`. It returns `undefined` for an event a newer registry added, or one whose fields changed, instead of throwing.
+
+```ts
+import { decodeEvent } from "@sorocron/sdk";
+
+const page = await cron.events();
+for (const raw of page.events) {
+  const e = decodeEvent(raw);
+  switch (e?.type) {
+    case "job_executed":
+      console.log(`job ${e.jobId} run ${e.run} by ${e.keeper}: ${e.success ? "ok" : "failed"}, fee ${e.fee}`);
+      break;
+    case "upgrade_proposed":
+      console.log(`upgrade announced, applies from ${new Date(Number(e.availableAt) * 1000).toISOString()}`);
+      break;
+  }
+}
+```
+
+The decoders are generated from the contract's interface snapshot by `scripts/gen-events.py` (run by `scripts/contract-snapshots.sh`), and a test fails if the contract declares an event or field the SDK doesn't know.
+
 ## Schedule a job
 
 Pass the signing account and a signer. Freighter's `signTransaction` works as is; in Node use `contract.basicNodeSigner(keypair, passphrase).signTransaction`.

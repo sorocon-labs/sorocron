@@ -44,6 +44,7 @@ export {
   type JobCall,
   type FeeRpc,
 } from "./fees.js";
+export * from "./registryEvents.js";
 export { TESTNET, type NetworkConfig } from "./networks.js";
 export type {
   Config,
