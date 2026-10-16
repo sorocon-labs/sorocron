@@ -1,6 +1,6 @@
 /**
- * Stake top-ups (#76). Slashing takes stake away, and a keeper below the
- * registry minimum can't execute anything. `planTopUp` works out how much to
+ * Stake top-ups (#76). A keeper below the registry minimum (for example
+ * after the admin raises it) can't execute anything. `planTopUp` works out how much to
  * stake to get back to a target; `keeper topup` in the CLI and the keeper
  * node's TOPUP_STAKE_TO_XLM setting both use it.
  */

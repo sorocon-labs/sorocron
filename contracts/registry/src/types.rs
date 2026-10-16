@@ -26,8 +26,8 @@ pub struct Config {
     /// Seconds after `next_run` during which only the run's assigned keeper
     /// may execute. `0` disables assigned windows (first come, first served).
     pub grace_period: u64,
-    /// Share of an assigned keeper's stake slashed when another keeper has to
-    /// run its job after the window, in basis points.
+    /// Unused since v5, which stopped slashing keepers for missed windows;
+    /// always 0 once `set_keeper_windows` runs. Kept so stored configs decode.
     pub slash_bps: u32,
     /// Unbonding epoch length in seconds. Keepers that start unbonding in the
     /// same epoch can all withdraw at the same time. `0` disables epochs.
@@ -176,7 +176,7 @@ pub struct Keeper {
     pub total_lateness: u64,
     /// Assigned runs this keeper missed, so another keeper ran them.
     pub missed: u32,
-    /// Stake lost to slashing for missed runs.
+    /// Stake lost to slashing for missed runs before v5, which removed it.
     pub slashed: i128,
 }
 
@@ -245,4 +245,10 @@ pub enum DataKey {
     PendingJobOwner(u64),
     /// `KeeperRecent` of a keeper.
     KeeperRecent(Address),
+    /// Temporary: when the owner last changed something that can stop a job's run.
+    JobTouched(u64),
+    /// Temporary: when the admin last un-halted a target.
+    TargetResumed(Address),
+    /// When the admin last unpaused the registry.
+    RegistryResumed,
 }

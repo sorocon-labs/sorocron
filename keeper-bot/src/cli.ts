@@ -220,7 +220,8 @@ keeper
         ["Executions", stats.executions],
         ["Average lateness", formatDuration(stats.average_lateness)],
         ["Missed windows", stats.missed],
-        ["Slashed", xlm(stats.slashed)],
+        // Only keepers slashed before v5 removed slashing.
+        ...(stats.slashed ? ([["Slashed before v5", xlm(stats.slashed)]] as [string, string][]) : []),
         // Recent figures need a v5 registry.
         ...(stats.recent_lateness === undefined
           ? []
@@ -242,7 +243,7 @@ keeper
 
 keeper
   .command("topup")
-  .description("Stake back up to a target, e.g. after slashing. Does nothing when already there, so it's safe to run from cron")
+  .description("Stake up to a target, e.g. after the minimum rises. Does nothing when already there, so it's safe to run from cron")
   .option("--to <xlm>", "stake to hold (default: the registry minimum)")
   .option("--max <xlm>", "fail instead of staking more than this")
   .option("--dry-run", "only show what would be staked")
@@ -314,7 +315,7 @@ program
         ["Minimum stake", xlm(c.min_stake)],
         ["Unbonding", formatDuration(c.unbonding_period) + (c.unbonding_epoch ? `, in epochs of ${formatDuration(c.unbonding_epoch)}` : "")],
         ["Protocol fee", c.protocol_fee_bps ? `${c.protocol_fee_bps / 100}% to ${c.treasury}` : "none"],
-        ["Assigned windows", c.grace_period ? `${formatDuration(c.grace_period)}, slashing ${c.slash_bps / 100}%` : "off"],
+        ["Assigned windows", c.grace_period ? `${formatDuration(c.grace_period)} (misses are recorded, never slashed)` : "off"],
         ["Pause after failures", c.max_failures || "never"],
         ["Upgrade delay", delay === undefined ? "none (upgrades apply immediately)" : formatDuration(delay)],
         [

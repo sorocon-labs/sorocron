@@ -23,6 +23,12 @@ cargo run --release -- --dry-run --once # simulate only, never send
 | `BATCH_SIZE` | `10` jobs per `execute_batch` (at most 20) |
 | `MIN_PROFIT_STROOPS` | `0`: skip batches whose XLM fees don't cover the network cost by this much |
 | `METRICS_PORT` | off; set it to serve `/metrics` and `/healthz` |
+| `MAX_COST_PER_JOB_STROOPS` | `10000000`: when jobs pay in another token, the most network cost per job it accepts |
+
+Before signing, it checks the transaction authorizes nothing but
+`registry.execute_batch`: a job's target that asks for the keeper's own
+authorization is refused. A batch that fails because of one job is retried
+job by job, and that job sits out 30 ticks.
 
 Each tick it reads `job_count`, checks `is_due` for every job, and runs the
 due jobs in `execute_batch` transactions of up to `BATCH_SIZE`. Each batch is

@@ -4,7 +4,7 @@
 extern crate std;
 
 use crate::test::*;
-use crate::{events, Error, Schedule, MAX_BPS, MAX_JOB_KEEPERS, VERSION};
+use crate::{events, Error, Schedule, MAX_BPS, MAX_GRACE_PERIOD, MAX_JOB_KEEPERS, VERSION};
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
     testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
@@ -467,9 +467,9 @@ fn allowlist_size_is_bounded() {
 const GRACE: u64 = 30;
 
 /// Two staked keepers with windows on; returns (job id, assigned, other).
-fn windowed_job(s: &Setup, slash_bps: u32) -> (u64, Address, Address) {
+fn windowed_job(s: &Setup) -> (u64, Address, Address) {
     let second = new_keeper(s);
-    s.cron.set_keeper_windows(&GRACE, &slash_bps);
+    s.cron.set_keeper_windows(&GRACE);
     let id = s.cron.create_job(&s.owner, &params(s), &1_000);
     let assigned = s.cron.assigned_keeper(&id).expect("windows are on");
     let other = if assigned == s.keeper {
@@ -483,7 +483,7 @@ fn windowed_job(s: &Setup, slash_bps: u32) -> (u64, Address, Address) {
 #[test]
 fn only_the_assigned_keeper_may_run_inside_the_window() {
     let s = setup();
-    let (id, assigned, other) = windowed_job(&s, 0);
+    let (id, assigned, other) = windowed_job(&s);
 
     assert_eq!(
         s.cron.try_execute(&other, &id),
@@ -493,71 +493,65 @@ fn only_the_assigned_keeper_may_run_inside_the_window() {
 }
 
 #[test]
-fn anyone_may_run_after_the_window_and_the_assigned_keeper_is_slashed() {
+fn anyone_may_run_after_the_window_and_the_miss_is_recorded_without_slashing() {
     let s = setup();
-    let (id, assigned, other) = windowed_job(&s, 1_000); // 10%
+    let (id, assigned, other) = windowed_job(&s);
     let other_before = s.token.balance(&other);
 
     advance(&s.env, GRACE);
     s.cron.execute(&other, &id);
-    let slashed_event = emitted(
+    assert!(emitted(
         &s,
-        &events::KeeperSlashed {
+        &events::KeeperMissedWindow {
             keeper: assigned.clone(),
             job_id: id,
-            amount: 100,
-            remaining: MIN_STAKE - 100,
-            beneficiary: other.clone(),
+            ran_by: other.clone(),
         }
         .to_xdr(&s.env, &s.cron.address),
-    );
-    assert!(slashed_event);
+    ));
 
     let missed = s.cron.get_keeper(&assigned).unwrap();
-    assert_eq!(missed.stake, MIN_STAKE - 100);
-    assert_eq!(missed.slashed, 100);
+    assert_eq!(missed.stake, MIN_STAKE);
+    assert_eq!(missed.slashed, 0);
     assert_eq!(missed.missed, 1);
-    // Fee and token are the same here: other gets the run fee plus the slash.
-    assert_eq!(s.token.balance(&other), other_before + FEE + 100);
+    // The keeper that ran it gets the run's fee and nothing else.
+    assert_eq!(s.token.balance(&other), other_before + FEE);
 }
 
 #[test]
-fn slashed_keeper_below_min_stake_loses_its_windows() {
+fn keeper_below_min_stake_loses_its_windows() {
     let s = setup();
-    let (id, assigned, other) = windowed_job(&s, 1_000);
-    advance(&s.env, GRACE);
-    s.cron.execute(&other, &id);
-
-    let stats = s.cron.keeper_stats(&assigned).unwrap();
-    assert!(!stats.eligible);
+    let (id, assigned, other) = windowed_job(&s);
+    // The admin raises the minimum; only `other` tops up.
+    s.cron.set_min_stake(&(MIN_STAKE * 2));
+    s.cron.stake(&other, &MIN_STAKE);
+    assert!(!s.cron.keeper_stats(&assigned).unwrap().eligible);
     assert_eq!(
         s.cron.try_execute(&assigned, &id),
         Err(Ok(Error::InsufficientStake))
     );
 
-    // From now on the ineligible keeper is never reserved a run, so `other`
-    // can run every one of them on time and nobody is slashed again.
+    // An ineligible keeper is never reserved a run, so `other` runs every
+    // one of them on time and no miss is recorded against anyone.
     for _ in 0..8 {
-        advance(&s.env, INTERVAL);
         assert_ne!(s.cron.assigned_keeper(&id), Some(assigned.clone()));
         s.cron.execute(&other, &id);
+        advance(&s.env, INTERVAL);
     }
-    let after = s.cron.get_keeper(&assigned).unwrap();
-    assert_eq!(after.missed, 1);
-    assert_eq!(after.slashed, 100);
+    assert_eq!(s.cron.get_keeper(&assigned).unwrap().missed, 0);
 }
 
 #[test]
-fn unbonding_keeper_is_never_assigned_or_slashed() {
+fn unbonding_keeper_is_never_assigned_or_charged_a_miss() {
     let s = setup();
-    let (id, assigned, other) = windowed_job(&s, 1_000);
+    let (id, assigned, other) = windowed_job(&s);
     s.cron.begin_unbonding(&assigned);
 
     assert!(!s.cron.active_keepers().contains(&assigned));
     // Only `other` is left in the rotation, so it holds the window.
     assert_eq!(s.cron.assigned_keeper(&id), Some(other.clone()));
     s.cron.execute(&other, &id);
-    assert_eq!(s.cron.get_keeper(&assigned).unwrap().slashed, 0);
+    assert_eq!(s.cron.get_keeper(&assigned).unwrap().missed, 0);
 }
 
 #[test]
@@ -593,12 +587,16 @@ fn windows_off_means_no_assigned_keeper() {
 }
 
 #[test]
-fn set_keeper_windows_caps_slashing() {
+fn assigned_windows_last_at_most_a_day() {
     let s = setup();
     assert_eq!(
-        s.cron.try_set_keeper_windows(&GRACE, &(MAX_BPS + 1)),
+        s.cron.try_set_keeper_windows(&(MAX_GRACE_PERIOD + 1)),
         Err(Ok(Error::InvalidSetting))
     );
+    s.cron.set_keeper_windows(&MAX_GRACE_PERIOD);
+    let config = s.cron.config();
+    assert_eq!(config.grace_period, MAX_GRACE_PERIOD);
+    assert_eq!(config.slash_bps, 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -60,18 +60,16 @@ pub struct JobDeactivated {
     pub failures: u32,
 }
 
-/// An assigned keeper missed its window and another keeper ran the job.
+/// The keeper assigned to a run had its whole window and let it pass, so
+/// another keeper ran the job. Counted in `keeper_stats`; never costs stake.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct KeeperSlashed {
+pub struct KeeperMissedWindow {
     #[topic]
     pub keeper: Address,
     pub job_id: u64,
-    pub amount: i128,
-    /// Stake left after slashing.
-    pub remaining: i128,
-    /// Keeper that ran the job and received the slashed amount.
-    pub beneficiary: Address,
+    /// Keeper that ran the job instead.
+    pub ran_by: Address,
 }
 
 #[contractevent]
@@ -267,7 +265,6 @@ pub struct MaxFailuresSet {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeeperWindowsSet {
     pub grace_period: u64,
-    pub slash_bps: u32,
 }
 
 #[contractevent]

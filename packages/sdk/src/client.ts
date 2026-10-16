@@ -10,6 +10,7 @@
  * transactions; reads work without them.
  */
 import { contract, rpc } from "@stellar/stellar-sdk";
+import { checkKeeperAuth } from "./auth.js";
 import { RestoreRequiredError, SoroCronError, parseContractError } from "./errors.js";
 import type { NetworkConfig } from "./networks.js";
 import { fetchEvents, toExecution, type EventPage, type Execution, type FetchEventsOptions } from "./events.js";
@@ -160,7 +161,7 @@ export class SoroCron {
     return this.read("get_keeper", { keeper });
   }
 
-  /** Executions, average lateness, missed windows and slashed stake. */
+  /** Executions, average lateness, missed windows and any stake slashed before v5. */
   keeperStats(keeper: string): Promise<KeeperStats | undefined> {
     return this.read("keeper_stats", { keeper });
   }
@@ -255,6 +256,10 @@ export class SoroCron {
       });
     }
     const result = unwrapResult<T>(tx.result);
+    if (method === "execute" || method === "execute_batch") {
+      // Keepers sign what simulation recorded, so never more than this call.
+      checkKeeperAuth(tx.simulationData.result.auth, this.contractId, method);
+    }
     const resourceFee = BigInt(tx.simulationData?.transactionData.resourceFee ?? 0n);
     return {
       result,

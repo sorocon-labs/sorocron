@@ -27,7 +27,7 @@ SoroCron replaces those servers with an open network:
 | 🔗 **Job chaining** | A job can follow another and run once per leader run (harvest, then compound) |
 | 🛡️ **Fund-less executor** | Targets are called by a contract that owns nothing, so jobs can never borrow the registry's authority |
 | 🧊 **State archival protection** | TTL Guardian extends a contract's instance and code TTL on schedule |
-| 🔒 **Keeper economics** | Staking with unbonding epochs, rotating assigned windows with slashing for missed runs, an optional protocol fee, and fees that rise while a run waits |
+| 🔒 **Keeper economics** | Staking with unbonding epochs, rotating assigned windows that record missed runs, an optional protocol fee, and fees that rise while a run waits |
 | 🩺 **Failure handling** | Failed target calls are charged and counted; jobs pause after repeated failures; the admin can halt one target without pausing the registry |
 | ⏸️ **Owner controls** | Fund, update, pause, resume or cancel jobs; refunds always available |
 | 📦 **Batching** | Register up to 20 jobs with one transfer; keepers run up to 20 due jobs per transaction, skipping failures |
@@ -186,7 +186,7 @@ A `stellar contract invoke` example for every registry function is in [docs/cli.
 | `propose_admin(new_admin)` / `cancel_admin_proposal()` / `accept_admin()` | admin / admin / proposed admin | Two-step admin handover |
 | `set_paused(bool)` / `set_target_halted(target, bool)` | admin | Emergency pause of the registry / of every job calling one target |
 | `set_min_stake`, `set_min_interval`, `set_max_args`, `set_max_failures`, `set_unbonding_epoch` | admin | Keeper and job limits |
-| `set_keeper_windows(grace_period, slash_bps)` | admin | Rotating assigned windows and the slash for missing one (at most 10%) |
+| `set_keeper_windows(grace_period)` | admin | Rotating assigned windows of up to a day; a keeper that lets its whole window pass gets a recorded miss, never a slash |
 | `set_protocol_fee(bps, treasury)` | admin | Share of each fee sent to a treasury (at most 10%) |
 | `propose_upgrade(wasm_hash) -> u64` / `cancel_upgrade()` | admin | Announce new registry code, or withdraw the announcement |
 | `apply_upgrade()` | admin | Install the announced code once `upgrade_delay()` has passed, keeping storage and address |
@@ -259,7 +259,7 @@ The [documentation site](https://sorocon-labs.github.io/sorocron/docs/) collects
 - [x] **M1: Core.** Registry, interval scheduling, resolvers, keeper staking and unbonding, pause, reference keeper, testnet deployment
 - [x] **M2: Hardening.** Fund-less executor, two-step admin, per-job pause
 - [x] **M3: State archival.** TTL Guardian
-- [x] **M4: Keeper economics.** Batch execution, rotating execution windows, slashing, protocol fee, fee ramps, failure tracking, unbonding epochs
+- [x] **M4: Keeper economics.** Batch execution, rotating execution windows, protocol fee, fee ramps, failure tracking, unbonding epochs
 - [x] **M5: Developer experience.** Typed TypeScript SDK, React hooks, web dashboard, job management CLI, Rust keeper, examples and tutorials, docs site
 - [ ] **M6: Mainnet.** ~~Invariant and fuzz testing, threat model~~ (v0.3), external audit, mainnet deployment
 

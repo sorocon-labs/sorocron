@@ -26,6 +26,7 @@ export interface Config {
   treasury?: string | null;
   max_failures: number;
   grace_period: bigint;
+  /** Unused since v5: missed windows are never slashed. Always 0 on v5 registries. */
   slash_bps: number;
   unbonding_epoch: bigint;
 }

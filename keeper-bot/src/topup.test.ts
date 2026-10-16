@@ -4,7 +4,7 @@ import { planTopUp } from "./topup.js";
 const keeper = (stake: bigint, unbonding_at?: bigint | null) => ({ stake, unbonding_at });
 
 describe("planTopUp", () => {
-  it("stakes the shortfall after a slash", () => {
+  it("stakes the shortfall", () => {
     expect(planTopUp(keeper(7n), 10n)).toEqual({ action: "stake", amount: 3n, stake: 7n, target: 10n });
   });
 

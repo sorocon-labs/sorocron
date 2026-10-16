@@ -44,7 +44,7 @@ export function Registry() {
                 ],
                 [
                   "Assigned keeper windows",
-                  config.grace_period ? `${formatDuration(config.grace_period)}, slashing ${(config.slash_bps ?? 0) / 100}%` : "Off",
+                  config.grace_period ? `${formatDuration(config.grace_period)}, misses recorded` : "Off",
                 ],
                 ["Pause after failures", config.max_failures ? `${config.max_failures} in a row` : "Never"],
                 ["Unbonding epochs", config.unbonding_epoch ? formatDuration(config.unbonding_epoch) : "Off"],

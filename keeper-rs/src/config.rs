@@ -30,6 +30,9 @@ pub struct Config {
     pub min_profit: i128,
     /// Serve `/metrics` and `/healthz` on this port; 0 turns the server off.
     pub metrics_port: u16,
+    /// When fees aren't paid in XLM, skip batches costing more than this per
+    /// job, in stroops. 0 sends any batch.
+    pub max_cost_per_job: i128,
 }
 
 #[derive(Debug)]
@@ -157,6 +160,7 @@ impl Config {
             min_profit: number("MIN_PROFIT_STROOPS", 0)?,
             metrics_port: u16::try_from(number("METRICS_PORT", 0)?)
                 .map_err(|_| ConfigError("METRICS_PORT must be a port number".into()))?,
+            max_cost_per_job: number("MAX_COST_PER_JOB_STROOPS", 10_000_000)?,
         })
     }
 }

@@ -12,8 +12,8 @@
  * Observability: METRICS_PORT serves Prometheus metrics on /metrics and a
  * liveness probe on /healthz; LOG_FORMAT=json gives structured logs.
  *
- * TOPUP_STAKE_TO_XLM makes it stake back up to that amount whenever slashing
- * takes stake away. With several STELLAR_RPC_URLS it fails over between them.
+ * TOPUP_STAKE_TO_XLM makes it stake up to that amount whenever it holds
+ * less. With several STELLAR_RPC_URLS it fails over between them.
  */
 import type { Keypair, rpc } from "@stellar/stellar-sdk";
 import type { SoroCron } from "@sorocron/sdk";
@@ -40,6 +40,7 @@ import { JobIndex } from "./jobIndex.js";
 import { createLogger } from "./logger.js";
 import { Metrics, startMetricsServer, type HealthState } from "./metrics.js";
 import { withRetry } from "./retry.js";
+import { Quarantine } from "./quarantine.js";
 import { planTopUp } from "./topup.js";
 import { tick, type BatchClient, type TickSummary } from "./tick.js";
 
@@ -49,6 +50,9 @@ const log = logger.info;
 
 /** Consecutive failed ticks before the RPC is reported down. */
 const RPC_DOWN_AFTER = 3;
+
+/** Ticks a job sits out after failing on its own (see quarantine.ts). */
+const QUARANTINE_TICKS = 30;
 
 /** How long an endpoint probe may take before the endpoint counts as down. */
 const PROBE_TIMEOUT_MS = 5_000;
@@ -112,6 +116,7 @@ async function main() {
   });
   const feeOptions = { percentile: settings.feePercentile, maxFee: settings.maxInclusionFee };
   let fees = new FeeStrategy(server, feeOptions);
+  const quarantine = new Quarantine(QUARANTINE_TICKS);
   const index = new JobIndex(
     {
       // Reads retry with backoff on transient RPC errors.
@@ -180,6 +185,8 @@ async function main() {
           feeIsNative: config.fee_token === NATIVE_TOKEN_CONTRACT_ID,
           explorer: EXPLORER,
           maxRestoreFee: settings.maxRestoreFee,
+          maxCostPerJob: settings.maxCostPerJob,
+          quarantine,
         },
         BigInt(Math.floor(Date.now() / 1000)),
       );
@@ -290,7 +297,7 @@ async function checkAccounts(
   }
 }
 
-/** Stakes back up to TOPUP_STAKE_TO_XLM when slashing takes stake away (#76). */
+/** Stakes up to TOPUP_STAKE_TO_XLM whenever the keeper holds less (#76). */
 async function topUpStake(cron: SoroCron, keeper: string) {
   if (!settings.topUpStakeTo) return;
   try {
@@ -305,7 +312,7 @@ async function topUpStake(cron: SoroCron, keeper: string) {
   }
 }
 
-/** Alerts when slashing or a raised minimum leaves the keeper ineligible. */
+/** Alerts when the keeper is close to, or below, the registry minimum. */
 async function checkStake(cron: SoroCron, keeper: string, minStake: bigint, alerts: Alerter) {
   const stats = await cron.keeperStats(keeper);
   if (!stats || !stats.eligible) {
@@ -319,7 +326,7 @@ async function checkStake(cron: SoroCron, keeper: string, minStake: bigint, aler
     await alerts.notify({
       kind: "low_stake",
       severity: "warning",
-      message: "stake is within 10% of the minimum; one slash could make the keeper ineligible",
+      message: "stake is within 10% of the minimum; raising the minimum could make the keeper ineligible",
       details: { stake: stats.stake, minStake },
     });
   }
@@ -339,6 +346,7 @@ function recordTick(metrics: Metrics, summary: TickSummary, durationMs: number, 
   metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "unprofitable" }, summary.unprofitable);
   metrics.inc("sorocron_keeper_jobs_total", help, { outcome: "failed" }, summary.failed);
   metrics.inc("sorocron_keeper_restores_total", "Archived-state restores sent before executing", {}, summary.restores);
+  metrics.set("sorocron_keeper_jobs_quarantined", "Due jobs set aside after failing on their own", summary.quarantined);
   metrics.inc(
     "sorocron_keeper_restore_fees_stroops_total",
     "Resource fees of archived-state restores",
