@@ -1,7 +1,7 @@
 use soroban_sdk::contracterror;
 
-/// Error codes are part of the public interface. Never renumber them;
-/// only append.
+/// Error codes are part of the public interface.
+// Never renumber them; only append.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]

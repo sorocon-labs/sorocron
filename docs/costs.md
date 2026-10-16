@@ -18,6 +18,32 @@ the mainnet fee schedule snapshot built into `soroban-sdk` 28
 fees as an upper bound. Re-run it after changing the contracts and paste the
 table below.
 
+## WASM size budget
+
+CI fails any contract over 60,000 bytes (`bash scripts/contract-snapshots.sh
+--sizes` prints the table; `contracts/wasm-sizes.txt` records the sizes).
+The network rejects contracts over 64 KiB, and every call pays to load the
+code, so the budget keeps a margin for urgent fixes as well as keeping calls
+cheap.
+
+The registry is 54,197 bytes. About 30 KB is code, 3 KB data, and 19 KB the
+contract spec: every exported function, type, event and error, with its doc
+comments. soroban-sdk copies `///` comments on exported items into the spec,
+so:
+
+- Keep `///` on exported items (contract functions, `#[contracttype]` types
+  used in the interface, events and errors) to one sentence, plus what
+  sentinel values mean (`0` means unlimited, `None` lets any keeper). Put
+  longer notes in `//` comments under it, or in `docs/`.
+- `python scripts/spec-sizes.py` lists the sections and the spec entries
+  with the most doc bytes.
+- Raise the budget only when a feature can't fit after trimming the spec,
+  never to within 2 KB of the network limit, and say so in the pull request
+  and here.
+
+Trimming the spec this way took the registry from 58,585 to 54,197 bytes
+with no change to its code or interface (#128).
+
 ## v5 (current)
 
 Registry interface v5, soroban-sdk 28.0.0.

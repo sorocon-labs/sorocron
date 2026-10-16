@@ -114,7 +114,7 @@ npm run demo
 
 All smart contracts in SoroCron adhere to strict production standards:
 
-- **`#![no_std]` & Size Budget**: Soroban rejects WASM binaries over 64 KB. No heap-heavy crates or `std` dependencies. CI enforces a 60 KB budget check.
+- **`#![no_std]` & Size Budget**: Soroban rejects WASM binaries over 64 KB. No heap-heavy crates or `std` dependencies. CI enforces a 60,000-byte budget. Doc comments (`///`) on exported functions, types, events and errors are copied into the WASM, so keep them to one sentence and put longer notes in `//` comments; see [the size budget](docs/costs.md#wasm-size-budget) and `python scripts/spec-sizes.py`.
 - **Checks, then Effects, then Interactions**: Always validate preconditions and update contract storage before making cross-contract calls or transferring tokens.
 - **Explicit Storage TTLs**: Every persistent read or write must extend its storage TTL using the helper routines in `storage.rs`.
 - **Events are Public API**: Emit a typed `#[contractevent]` for every state change. Do not rename or remove existing event fields without consensus.

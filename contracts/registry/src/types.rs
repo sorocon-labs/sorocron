@@ -6,13 +6,15 @@ pub struct Config {
     pub admin: Address,
     /// SEP-41 token that job owners deposit and keepers are paid in.
     pub fee_token: Address,
-    /// SEP-41 token keepers stake. May be the same as `fee_token`.
+    /// SEP-41 token keepers stake.
+    // May be the same as `fee_token`.
     pub stake_token: Address,
     pub min_stake: i128,
     /// Seconds between `begin_unbonding` (or the end of its epoch) and `withdraw_stake`.
     pub unbonding_period: u64,
     pub paused: bool,
-    /// Contract that performs target calls. Set once via `set_executor`.
+    /// Contract that performs target calls.
+    // Set once via `set_executor`.
     pub executor: Option<Address>,
     /// Minimum `interval` a job may schedule, in seconds. `0` means no minimum.
     pub min_interval: u64,
@@ -27,14 +29,17 @@ pub struct Config {
     /// may execute. `0` disables assigned windows (first come, first served).
     pub grace_period: u64,
     /// Unused since v5, which stopped slashing keepers for missed windows;
-    /// always 0 once `set_keeper_windows` runs. Kept so stored configs decode.
+    /// always 0 once `set_keeper_windows` runs.
+    // Kept so stored configs decode.
     pub slash_bps: u32,
-    /// Unbonding epoch length in seconds. Keepers that start unbonding in the
-    /// same epoch can all withdraw at the same time. `0` disables epochs.
+    /// Unbonding epoch length in seconds.
+    // Keepers that start unbonding in the same epoch can all withdraw at the
+    // same time. `0` disables epochs.
     pub unbonding_epoch: u64,
 }
 
-/// When a job runs. Calendar schedules are in UTC and never drift.
+/// When a job runs.
+// Calendar schedules are in UTC and never drift.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Schedule {
@@ -63,8 +68,9 @@ pub struct JobParams {
     pub start_at: u64,
     /// Fee-token amount paid for each run.
     pub fee_per_run: i128,
-    /// Highest fee a late run pays. `0` keeps the fee flat; otherwise it rises
-    /// linearly from `fee_per_run` when the run is due to this after one interval.
+    /// Highest fee a late run pays. `0` keeps the fee flat.
+    // Otherwise it rises linearly from `fee_per_run` when the run is due to
+    // this after one interval.
     pub max_fee_per_run: i128,
     /// Maximum number of runs. `0` means unlimited.
     pub max_runs: u32,
@@ -79,20 +85,23 @@ pub struct JobParams {
     pub after: Option<u64>,
 }
 
-/// Input to `update_job`. Replaces every mutable setting of a job at once;
-/// pass the current value for anything you don't want to change.
+/// Input to `update_job`.
+// Replaces every mutable setting of a job at once; pass the current value for
+// anything you don't want to change.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct JobUpdate {
     pub function: Symbol,
     pub args: Vec<Val>,
-    /// `0` unless `schedule` is `Interval`. A new interval takes effect after the next run.
+    /// `0` unless `schedule` is `Interval`.
+    // A new interval takes effect after the next run.
     pub interval: u64,
     /// Switching to a different calendar time reschedules the next run to it.
     pub schedule: Schedule,
     pub fee_per_run: i128,
     pub max_fee_per_run: i128,
-    /// `0` means unlimited. Setting it at or below the current `runs` stops the job.
+    /// `0` means unlimited.
+    // Setting it at or below the current `runs` stops the job.
     pub max_runs: u32,
     /// `0` means never.
     pub end_at: u64,
@@ -128,12 +137,14 @@ pub struct Job {
     pub after: Option<u64>,
     /// `false` while paused, by the owner or after `max_failures` failures.
     pub active: bool,
-    /// Consecutive runs whose target call failed. Reset by a successful run.
+    /// Consecutive runs whose target call failed.
+    // Reset by a successful run.
     pub failures: u32,
 }
 
-/// A job's settings, which change only through `update_job`. Stored apart
-/// from `JobState` so every run rewrites only the small state entry.
+/// A job's settings, which change only through `update_job`.
+// Stored apart from `JobState` so every run rewrites only the small state
+// entry.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct JobSpec {
@@ -201,8 +212,9 @@ pub struct KeeperStats {
 }
 
 /// Recent performance behind `KeeperStats::recent_*`, stored apart from
-/// `Keeper` so existing keeper entries keep their layout. Both values are
-/// eight times a moving average, which keeps integer rounding from drifting.
+/// `Keeper` so existing keeper entries keep their layout.
+// Both values are eight times a moving average, which keeps integer rounding
+// from drifting.
 #[contracttype]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct KeeperRecent {
@@ -216,9 +228,9 @@ pub struct KeeperRecent {
 pub struct PendingUpgrade {
     pub wasm_hash: BytesN<32>,
     pub proposed_at: u64,
-    /// Earliest time `apply_upgrade` installs it. Lengthening the unbonding
-    /// epoch or the upgrade delay afterwards moves it later; nothing moves
-    /// it earlier.
+    /// Earliest time `apply_upgrade` installs it.
+    // Lengthening the unbonding epoch or the upgrade delay afterwards moves it
+    // later; nothing moves it earlier.
     pub available_at: u64,
 }
 

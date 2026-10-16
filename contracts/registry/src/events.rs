@@ -33,8 +33,9 @@ pub struct JobExecuted {
     pub job_id: u64,
     #[topic]
     pub keeper: Address,
-    /// Whether the target call succeeded. A failed run is still charged:
-    /// the keeper did the work and the schedule advances.
+    /// Whether the target call succeeded.
+    // A failed run is still charged: the keeper did the work and the schedule
+    // advances.
     pub success: bool,
     /// Total fee charged to the job for this run.
     pub fee: i128,
@@ -47,7 +48,8 @@ pub struct JobExecuted {
     /// Consecutive failures after this run (`0` after a success).
     pub failures: u32,
     /// sha256 of the XDR-serialized return value (or error) of the target
-    /// call. Lets indexers verify a run's outcome without re-simulating it.
+    /// call.
+    // Lets indexers verify a run's outcome without re-simulating it.
     pub result_hash: BytesN<32>,
 }
 
@@ -61,7 +63,8 @@ pub struct JobDeactivated {
 }
 
 /// The keeper assigned to a run had its whole window and let it pass, so
-/// another keeper ran the job. Counted in `keeper_stats`; never costs stake.
+/// another keeper ran the job.
+// Counted in `keeper_stats`; never costs stake.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeeperMissedWindow {
@@ -220,8 +223,8 @@ pub struct UpgradeDelaySet {
     pub upgrade_delay: u64,
 }
 
-/// A job handover started with `propose_job_owner`. `proposed` equal to
-/// `owner` means the pending proposal was withdrawn.
+/// A job handover started with `propose_job_owner`.
+// `proposed` equal to `owner` means the pending proposal was withdrawn.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JobOwnerProposed {
