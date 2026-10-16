@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { schedule, type EventPage, type Job, type RegistryEvent } from "@sorocron/sdk";
+import { EVENT_SPECS, schedule, type EventPage, type FieldKind, type Job, type RegistryEvent } from "@sorocron/sdk";
 import { JobIndex, mightBeDue, toIndexed, type IndexSource } from "./jobIndex.js";
 
 function job(id: bigint, overrides: Partial<Job> = {}): Job {
@@ -24,15 +24,29 @@ function job(id: bigint, overrides: Partial<Job> = {}): Job {
   };
 }
 
-const ev = (name: string, id: bigint, data: Record<string, unknown> = {}): RegistryEvent => ({
-  name,
-  topics: [id],
-  data,
-  ledger: 10,
-  closedAt: "",
-  txHash: "",
-  id: `${name}-${id}`,
-});
+const DEFAULTS: Record<FieldKind, unknown> = {
+  u64: 0n,
+  i128: 0n,
+  u32: 0,
+  bool: false,
+  address: "GKEEPER",
+  bytes: new Uint8Array(32),
+  option_address: null,
+};
+
+/** A complete event for job `id`, with `data` overriding the defaults. */
+const ev = (name: string, id: bigint, data: Record<string, unknown> = {}): RegistryEvent => {
+  const spec = EVENT_SPECS[name];
+  return {
+    name,
+    topics: [id, ...spec.topics.slice(1).map(([, kind]) => DEFAULTS[kind])],
+    data: { ...Object.fromEntries(spec.data.map(([field, kind]) => [field, DEFAULTS[kind]])), ...data },
+    ledger: 10,
+    closedAt: "",
+    txHash: "",
+    id: `${name}-${id}`,
+  };
+};
 
 /** A fake registry with a call counter and a queue of event pages. */
 function fakeSource(initial: Job[]) {

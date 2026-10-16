@@ -11,7 +11,7 @@
  * keeper was offline longer than the server keeps events), or after
  * `resyncEveryTicks`, the index reloads everything from scratch.
  */
-import type { EventPage, FetchEventsOptions, Job, RegistryEvent } from "@sorocron/sdk";
+import { decodeEvent, type EventPage, type FetchEventsOptions, type Job, type RegistryEvent } from "@sorocron/sdk";
 import type { Logger } from "./logger.js";
 
 /** What the keeper tracks per job: enough to decide if it might be due. */
@@ -133,34 +133,35 @@ export class JobIndex {
   }
 
   /** Updates the index for one event; returns how many RPC calls it made. */
-  private async apply(event: RegistryEvent): Promise<number> {
-    const id = event.topics[0] as bigint;
-    const d = event.data;
-    const job = typeof id === "bigint" ? this.jobs.get(id) : undefined;
-    switch (event.name) {
+  private async apply(raw: RegistryEvent): Promise<number> {
+    // Typed decoding (#134); events a newer registry adds are skipped.
+    const event = decodeEvent(raw);
+    if (!event) return 0;
+    const job = "jobId" in event ? this.jobs.get(event.jobId) : undefined;
+    switch (event.type) {
       case "job_created":
       case "job_updated": {
-        const fresh = await this.source.getJob(id);
-        if (fresh) this.jobs.set(id, toIndexed(fresh));
+        const fresh = await this.source.getJob(event.jobId);
+        if (fresh) this.jobs.set(event.jobId, toIndexed(fresh));
         return 1;
       }
       case "job_cancelled":
-        this.jobs.delete(id);
+        this.jobs.delete(event.jobId);
         return 0;
       case "job_executed":
         if (job) {
-          job.nextRun = BigInt(d.next_run as bigint);
-          job.runs = Number(d.run);
-          job.balance -= BigInt(d.fee as bigint);
+          job.nextRun = event.nextRun;
+          job.runs = event.run;
+          job.balance -= event.fee;
         }
         return 0;
       case "job_funded":
       case "job_withdrawn":
       case "job_exhausted":
-        if (job) job.balance = BigInt(d.balance as bigint);
+        if (job) job.balance = event.balance;
         return 0;
       case "job_active_set":
-        if (job) job.active = Boolean(d.active);
+        if (job) job.active = event.active;
         return 0;
       case "job_deactivated":
         if (job) job.active = false;
