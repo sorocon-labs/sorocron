@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { formatAmount, jobStatus, type Job } from "@sorocron/sdk";
 import { Icon } from "../components/Icon";
 import { JobTable } from "../components/JobTable";
-import { Button, Empty, PageHeader, Segmented, Skeleton, Stat } from "../components/ui";
-import { navigate } from "../router";
+import { Button, Card, Empty, PageHeader, Segmented, Skeleton, Stat } from "../components/ui";
+import { Link, navigate } from "../router";
 import { useNow, useRegistry } from "../state/registry";
 import { useWallet } from "../state/wallet";
 
@@ -112,10 +112,12 @@ export function Jobs() {
 }
 
 export function MyJobs() {
-  const { jobs, loading } = useRegistry();
+  const { jobs, loading, handovers } = useRegistry();
   const { account, promptConnect } = useWallet();
   const now = useNow();
   const mine = jobs.filter((j) => j.owner === account);
+  // Jobs other owners are handing to this account (v5).
+  const incoming = jobs.filter((j) => j.owner !== account && account !== undefined && handovers?.get(j.id) === account);
   const escrow = mine.reduce((sum, j) => sum + j.balance, 0n);
   const attention = mine.filter((j) => MATCH.attention(jobStatus(j, now))).length;
   const newJob = (
@@ -143,6 +145,21 @@ export function MyJobs() {
         </section>
       ) : (
         <>
+          {incoming.length > 0 && (
+            <Card title="Waiting for you to accept" className="handovers">
+              <ul>
+                {incoming.map((j) => (
+                  <li key={j.id.toString()}>
+                    <Icon name="user" size={15} />
+                    <span>
+                      Job #{j.id.toString()}, <span className="mono">{j.function}()</span> with {formatAmount(j.balance)} XLM
+                    </span>
+                    <Link to={{ name: "job", id: j.id }}>Review and accept</Link>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
           <div className="stats-row three">
             <Stat label="Your jobs" value={mine.length} />
             <Stat label="Escrowed" value={`${formatAmount(escrow)} XLM`} />

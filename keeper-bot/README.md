@@ -212,7 +212,7 @@ it prints one JSON object per line.
 
 ```bash
 npm run cli -- jobs watch 7                    # from now on
-npm run cli -- jobs watch 7 --from-ledger 5219929   # replay first (RPC keeps about a week)
+npm run cli -- jobs watch 7 --from-ledger 5219929   # replay first, as far back as the RPC keeps events
 ```
 
 ```text

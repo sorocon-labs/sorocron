@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { formatAmount, parseAmount, type Sent } from "@sorocron/sdk";
+import { StrKey } from "@stellar/stellar-sdk";
 import { Modal, TxStatus, useTx } from "../components/Modal";
 import { Icon } from "../components/Icon";
 import { Button, Field, TextInput } from "../components/ui";
@@ -169,6 +170,83 @@ export function AmountModal({
       )}
       {children}
       <TxStatus tx={tx} success={success} />
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- transfer
+
+/**
+ * Offer a job to another account (v5 two-step handover). Nothing changes
+ * hands until that account accepts, and the owner can withdraw the offer.
+ */
+export function TransferModal({
+  open,
+  onClose,
+  jobId,
+  balance,
+  owner,
+  send,
+}: {
+  open: boolean;
+  onClose: () => void;
+  jobId: bigint;
+  balance: bigint;
+  owner: string;
+  send: (to: string) => Promise<Sent<unknown>>;
+}) {
+  const tx = useTx();
+  const [to, setTo] = useState("");
+  useEffect(() => {
+    if (open) {
+      setTo("");
+      tx.reset();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const address = to.trim();
+  const error = !address
+    ? undefined
+    : !StrKey.isValidEd25519PublicKey(address) && !StrKey.isValidContract(address)
+      ? "Enter an account (G…) or contract (C…) address."
+      : address === owner
+        ? "That's the current owner."
+        : undefined;
+  const pending = tx.phase === "pending";
+  const done = tx.phase === "done";
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      locked={pending}
+      size="sm"
+      title={`Transfer job #${jobId}`}
+      description={`The new owner gets the job's ${formatAmount(balance)} XLM balance and history once they accept. Until then it stays yours and you can withdraw the offer.`}
+      footer={
+        done ? (
+          <Button variant="primary" onClick={onClose} data-autofocus>
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={pending}>
+              Cancel
+            </Button>
+            <Button variant="primary" disabled={!address || !!error || pending} onClick={() => tx.run(() => send(address))}>
+              {pending ? "Confirming…" : "Offer job"}
+            </Button>
+          </>
+        )
+      }
+    >
+      {!done && (
+        <Field label="New owner" error={error} hint="They accept from this job's page, or with `sorocron jobs accept`." htmlFor="new-owner">
+          <TextInput id="new-owner" mono value={to} onChange={setTo} placeholder="G… or C…" data-autofocus disabled={pending} />
+        </Field>
+      )}
+      <TxStatus tx={tx} success="Offer sent. The job moves once they accept." />
     </Modal>
   );
 }

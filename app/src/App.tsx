@@ -12,6 +12,7 @@ import { Overview } from "./pages/Overview";
 import { Registry } from "./pages/Registry";
 import { Link, navigate, useRoute, type Route } from "./router";
 import { DOCS_URL, NETWORK, RegistryProvider, useNow, useRegistry } from "./state/registry";
+import { UpgradeBanner } from "./components/UpgradeBanner";
 import { WalletProvider, useWallet } from "./state/wallet";
 
 export default function App() {
@@ -158,6 +159,7 @@ function Shell() {
             </button>
           </div>
         )}
+        <UpgradeBanner />
         <div className="page" key={route.name === "job" ? `job-${route.id}` : route.name}>
           <Page route={route} />
         </div>

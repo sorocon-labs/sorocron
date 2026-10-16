@@ -26,6 +26,8 @@ export {
   fetchEvents,
   toExecution,
   leaderboard,
+  offersTo,
+  topicFilter,
   type RegistryEvent,
   type EventPage,
   type FetchEventsOptions,

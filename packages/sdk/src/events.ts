@@ -6,7 +6,8 @@
  * rest as a map, e.g. `JobExecuted` is
  * `topics: ["job_executed", job_id, keeper]`, `value: { success, fee, ... }`.
  *
- * RPC servers keep events for a limited window (about a week on testnet).
+ * RPC servers keep events for a limited window, set by each server (from
+ * hours to a week).
  * `fetchEvents` clamps the start ledger to what the server still has instead
  * of failing, so callers can always ask for "everything since X".
  */
@@ -40,9 +41,26 @@ export interface FetchEventsOptions {
   cursor?: string;
   /** Keep only these event names. */
   names?: string[];
+  /**
+   * Topic filters the RPC server applies, as base64 `ScVal`s or `*`, one
+   * array per accepted shape. Unlike `names`, this keeps unrelated events
+   * out of the page entirely; see `topicFilter`.
+   */
+  topics?: string[][];
   /** Page size (RPC maximum 10,000). */
   limit?: number;
 }
+
+/**
+ * A server-side filter for one event name, for events with `extraTopics`
+ * topics after the name (e.g. 1 for `job_owner_proposed`'s job id).
+ */
+export function topicFilter(name: string, extraTopics: number): string[] {
+  return [xdr.ScVal.scvSymbol(name).toXDR("base64"), ...Array<string>(extraTopics).fill("*")];
+}
+
+/** Ledgers (about a minute) skipped past the retention start when clamping. */
+const RETENTION_MARGIN = 12;
 
 const decode = (v: xdr.ScVal | string): unknown =>
   scValToNative(typeof v === "string" ? xdr.ScVal.fromXDR(v, "base64") : v);
@@ -63,7 +81,7 @@ function retentionStart(err: unknown): number | undefined {
 }
 
 export async function fetchEvents(server: rpc.Server, contractId: string, options: FetchEventsOptions = {}): Promise<EventPage> {
-  const filters = [{ type: "contract" as const, contractIds: [contractId] }];
+  const filters = [{ type: "contract" as const, contractIds: [contractId], ...(options.topics ? { topics: options.topics } : {}) }];
   const limit = options.limit ?? 1_000;
   let response: rpc.Api.GetEventsResponse;
   if (options.cursor) {
@@ -79,7 +97,8 @@ export async function fetchEvents(server: rpc.Server, contractId: string, option
     } catch (err) {
       const earliest = retentionStart(err);
       if (earliest === undefined || earliest <= startLedger) throw err;
-      response = await server.getEvents({ filters, startLedger: earliest, limit });
+      // The window's start moves with every ledger, so leave a little room.
+      response = await server.getEvents({ filters, startLedger: earliest + RETENTION_MARGIN, limit });
     }
   }
 
@@ -100,6 +119,19 @@ export async function fetchEvents(server: rpc.Server, contractId: string, option
     });
   }
   return { events, latestLedger: response.latestLedger, cursor: response.cursor ?? events.at(-1)?.id };
+}
+
+/**
+ * Job ids offered to `address` in these `job_owner_proposed` events, newest
+ * offer per job. Offers may since have been accepted or withdrawn; confirm
+ * with `pending_job_owner`.
+ */
+export function offersTo(events: RegistryEvent[], address: string): bigint[] {
+  const latest = new Map<bigint, string>();
+  for (const e of events) {
+    if (e.name === "job_owner_proposed") latest.set(BigInt(e.topics[0] as bigint), String(e.data.proposed));
+  }
+  return [...latest].filter(([, proposed]) => proposed === address).map(([id]) => id);
 }
 
 /** A decoded `JobExecuted` receipt. */

@@ -3,15 +3,15 @@ import { currentFee, describeSchedule, formatAmount, formatDuration, jobStatus, 
 import { Icon } from "../components/Icon";
 import { Address, Badge, Button, Card, Empty, Facts, Meter, PageHeader, Skeleton, StatusBadge, relative } from "../components/ui";
 import { Modal } from "../components/Modal";
-import { AmountModal, ConfirmModal } from "../modals";
+import { AmountModal, ConfirmModal, TransferModal } from "../modals";
 import { Link, navigate } from "../router";
 import { useNow, useRegistry } from "../state/registry";
 import { useWallet } from "../state/wallet";
 
-type Dialog = "fund" | "withdraw" | "pause" | "cancel" | "manage" | null;
+type Dialog = "fund" | "withdraw" | "pause" | "cancel" | "manage" | "transfer" | "withdraw-offer" | "accept" | null;
 
 export function JobDetail({ id }: { id: bigint }) {
-  const { jobs, loading, cron } = useRegistry();
+  const { jobs, loading, cron, handovers } = useRegistry();
   const { account, promptConnect } = useWallet();
   const now = useNow();
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -52,6 +52,9 @@ export function JobDetail({ id }: { id: bigint }) {
 
   const status = jobStatus(job, now);
   const isOwner = account === job.owner;
+  // Two-step handover (v5): the owner offers the job, the new owner accepts.
+  const offeredTo = handovers?.get(job.id);
+  const offeredToMe = offeredTo !== undefined && offeredTo === account && !isOwner;
   const left = runsRemaining(job);
   const requireWallet = (d: Dialog) => (account ? setDialog(d) : promptConnect());
 
@@ -82,6 +85,9 @@ export function JobDetail({ id }: { id: bigint }) {
                 <Button icon={job.active ? "pause" : "play"} onClick={() => setDialog("pause")}>
                   {job.active ? "Pause" : "Resume"}
                 </Button>
+                <Button icon="user" onClick={() => setDialog("transfer")}>
+                  Transfer
+                </Button>
                 <Button variant="danger" icon="trash" onClick={() => setDialog("cancel")}>
                   Cancel
                 </Button>
@@ -90,6 +96,28 @@ export function JobDetail({ id }: { id: bigint }) {
           </>
         }
       />
+
+      {offeredToMe && (
+        <div className="callout handover" role="region" aria-label="Job handover">
+          <Icon name="user" size={16} />
+          <span>
+            <Address value={job.owner} /> is handing this job to you, with its {formatAmount(job.balance)} XLM balance and history. It becomes yours when
+            you accept.
+          </span>
+          <Button variant="primary" onClick={() => setDialog("accept")}>
+            Accept job
+          </Button>
+        </div>
+      )}
+      {isOwner && offeredTo && offeredTo !== account && (
+        <div className="callout handover" role="region" aria-label="Job handover">
+          <Icon name="user" size={16} />
+          <span>
+            Handing over to <Address value={offeredTo} />. It stays yours, and you keep full control, until they accept.
+          </span>
+          <Button onClick={() => setDialog("withdraw-offer")}>Withdraw offer</Button>
+        </div>
+      )}
 
       <div className="bento">
         <ScheduleCard job={job} now={now} />
@@ -199,6 +227,15 @@ export function JobDetail({ id }: { id: bigint }) {
               <small>{job.active ? "Keepers stop running it until you resume" : "Keepers run it again from its next time"}</small>
             </span>
           </button>
+          <button type="button" className="sheet-row" onClick={() => setDialog("transfer")}>
+            <span className="choice-icon">
+              <Icon name="user" size={17} />
+            </span>
+            <span className="sheet-row-text">
+              <strong>Transfer job</strong>
+              <small>Offer it to another account, which then accepts</small>
+            </span>
+          </button>
           <button type="button" className="sheet-row danger" onClick={() => setDialog("cancel")}>
             <span className="choice-icon">
               <Icon name="trash" size={17} />
@@ -245,6 +282,32 @@ export function JobDetail({ id }: { id: bigint }) {
             action={job.active ? "Pause job" : "Resume job"}
             success={job.active ? "Job paused" : "Job resumed"}
             send={() => cron.setJobActive(job.id, !job.active)}
+          />
+          <TransferModal
+            open={dialog === "transfer"}
+            onClose={() => setDialog(null)}
+            jobId={job.id}
+            balance={job.balance}
+            owner={job.owner}
+            send={(to) => cron.proposeJobOwner(job.id, to)}
+          />
+          <ConfirmModal
+            open={dialog === "withdraw-offer"}
+            onClose={() => setDialog(null)}
+            title="Withdraw the handover?"
+            description="The offer is cancelled and the job stays yours. You can offer it again later."
+            action="Withdraw offer"
+            success="Offer withdrawn"
+            send={() => cron.proposeJobOwner(job.id, account!)}
+          />
+          <ConfirmModal
+            open={dialog === "accept"}
+            onClose={() => setDialog(null)}
+            title={`Accept job #${job.id}?`}
+            description={`You become its owner: you can fund, withdraw its ${formatAmount(job.balance)} XLM balance, pause, change or cancel it.`}
+            action="Accept job"
+            success="The job is yours"
+            send={() => cron.acceptJobOwner(job.id)}
           />
           <ConfirmModal
             open={dialog === "cancel"}

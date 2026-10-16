@@ -20,7 +20,7 @@ const LINKS: [IconName, string, string, string][] = [
 ];
 
 export function Registry() {
-  const { config, version, cron } = useRegistry();
+  const { config, version, cron, pendingUpgrade, upgradeDelay } = useRegistry();
 
   return (
     <>
@@ -49,6 +49,22 @@ export function Registry() {
                 ["Pause after failures", config.max_failures ? `${config.max_failures} in a row` : "Never"],
                 ["Unbonding epochs", config.unbonding_epoch ? formatDuration(config.unbonding_epoch) : "Off"],
                 ["Executor", config.executor ? <Address key="e" value={config.executor} /> : "Not connected"],
+                ...((version ?? 0) >= 5
+                  ? ([
+                      ["Upgrade delay", upgradeDelay !== undefined ? formatDuration(upgradeDelay) : "…"],
+                      [
+                        "Announced upgrade",
+                        pendingUpgrade ? (
+                          <span key="u" className="mono wrap">
+                            {[...pendingUpgrade.wasm_hash].map((b) => b.toString(16).padStart(2, "0")).join("")}, from{" "}
+                            {new Date(Number(pendingUpgrade.available_at) * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                          </span>
+                        ) : (
+                          "None"
+                        ),
+                      ],
+                    ] as [string, React.ReactNode][])
+                  : []),
               ]}
             />
           ) : (

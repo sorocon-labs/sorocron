@@ -447,6 +447,19 @@ p {
 .banner span {
   flex: 1;
 }
+.banner.notice {
+  background: var(--yellow-bg);
+  color: var(--yellow-fg);
+}
+.banner.notice a {
+  color: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.banner .mono {
+  flex: none;
+}
 
 /* ---- buttons ------------------------------------------------------------ */
 
@@ -736,6 +749,39 @@ p {
 .callout .icon {
   margin-top: 3px;
   color: var(--muted);
+}
+.callout.handover {
+  align-items: center;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.callout.handover > span {
+  flex: 1;
+  min-width: 220px;
+}
+.handovers {
+  margin-bottom: 18px;
+}
+.handovers ul {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.handovers li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.handovers li > span {
+  flex: 1;
+}
+.handovers a {
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .callout.warning {
   background: var(--yellow-bg);

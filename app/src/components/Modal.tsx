@@ -94,7 +94,8 @@ export function Modal({
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
       >
-        <header className="modal-head">
+        {/* A div, not <header>: outside <main> that would be a second page banner. */}
+        <div className="modal-head">
           <div>
             <h2 id={titleId}>{title}</h2>
             {description && (
@@ -106,7 +107,7 @@ export function Modal({
           <button type="button" className="icon-btn" aria-label="Close" onClick={onClose} disabled={locked}>
             <Icon name="close" />
           </button>
-        </header>
+        </div>
         {children && <div className="modal-body">{children}</div>}
         {footer && <footer className="modal-foot">{footer}</footer>}
       </div>
