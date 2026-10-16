@@ -56,15 +56,20 @@ pub fn set_target_resumed(env: &Env, target: &Address, at: u64) {
 
 /// Last time the admin unpaused the registry. Kept in instance storage,
 /// which lives as long as the contract.
-pub fn registry_resumed(env: &Env) -> u64 {
+/// When assigned windows last restarted for every job: the registry was
+/// unpaused, windows were changed, or the keeper rotation or eligibility
+/// changed. Stored under `RegistryResumed`, its v5 name.
+pub fn windows_reset(env: &Env) -> u64 {
     env.storage()
         .instance()
         .get(&DataKey::RegistryResumed)
         .unwrap_or(0)
 }
 
-pub fn set_registry_resumed(env: &Env, at: u64) {
-    env.storage().instance().set(&DataKey::RegistryResumed, &at);
+pub fn reset_windows(env: &Env) {
+    env.storage()
+        .instance()
+        .set(&DataKey::RegistryResumed, &env.ledger().timestamp());
 }
 
 fn extend_instance(env: &Env) {
@@ -290,12 +295,16 @@ pub fn active_keepers(env: &Env) -> Vec<Address> {
 }
 
 /// Adds `keeper` to the window rotation if it isn't there and there is room.
-pub fn add_active_keeper(env: &Env, keeper: &Address, max: u32) {
+/// Adds `keeper` to the window rotation if there's room; returns whether it
+/// was added.
+pub fn add_active_keeper(env: &Env, keeper: &Address, max: u32) -> bool {
     let mut list = active_keepers(env);
-    if !list.contains(keeper) && list.len() < max {
-        list.push_back(keeper.clone());
-        set_persistent(env, &DataKey::ActiveKeepers, &list);
+    if list.contains(keeper) || list.len() >= max {
+        return false;
     }
+    list.push_back(keeper.clone());
+    set_persistent(env, &DataKey::ActiveKeepers, &list);
+    true
 }
 
 pub fn remove_active_keeper(env: &Env, keeper: &Address) {

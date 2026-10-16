@@ -261,6 +261,7 @@ pub enum DataKey {
     JobTouched(u64),
     /// Temporary: when the admin last un-halted a target.
     TargetResumed(Address),
-    /// When the admin last unpaused the registry.
+    /// When assigned windows last restarted for every job (unpause, window
+    /// or minimum-stake change, keeper rotation change).
     RegistryResumed,
 }

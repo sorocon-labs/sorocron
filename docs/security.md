@@ -31,7 +31,9 @@ The executor is connected once with `set_executor` and can never be swapped, so 
 Consequences for integrators:
 
 1. **Never give the executor (or the registry) privileges.** Don't make either an admin, owner, or allow-listed caller of your contract. Any job owner can schedule any call, so a privilege granted to the executor is granted to everyone.
-2. **Defence in depth:** jobs still may not target the registry, the executor, or the fee and stake tokens (`ForbiddenTarget`).
+2. **Defence in depth:** jobs still may not target the registry, the executor, or the fee and stake tokens (`ForbiddenTarget`), checked both when a job is created and when it runs (a job created before `set_executor` could otherwise aim at the executor's address).
+
+`test_review.rs` plays the ways a target might try to reach escrowed funds: calling the fee token to transfer, approve or burn the registry's balance, and asking the executor to make that call for it. All fail, and the run is recorded as a failed run paid from the job's own balance. Nobody but the registry can call the executor.
 
 ## Other properties
 
@@ -57,16 +59,17 @@ Every token that enters (deposits, funding, stake) is credited to exactly one jo
 
 ## Missed windows
 
-Up to v4, a keeper that let its assigned window pass lost up to 10% of its stake to whichever keeper ran the job instead. That was exploitable (reported privately in October 2026): whether a run is possible during a window depends on things the job's owner controls. An attacker who was also a staked keeper could create a job assigned to a victim, keep it from running through the victim's window (a resolver that says no, pausing the job, draining its balance, or adding the victim to the allowlist only after the window), then run it the moment the window closed and collect 10% of the victim's stake per run. Even without any of those tricks, an owner can make a job unprofitable or expensive to run, which keeper bots rightly skip.
+Up to v4, a keeper that let its assigned window pass lost up to 10% of its stake to whichever keeper ran the job instead. That was exploitable (reported by KupiaSec in October 2026): whether a run is possible during a window depends on things the job's owner controls. An attacker who was also a staked keeper could create a job assigned to a victim, keep it from running through the victim's window (a resolver that says no, pausing the job, draining its balance, or adding the victim to the allowlist only after the window), then run it the moment the window closed and collect 10% of the victim's stake per run. Even without any of those tricks, an owner can make a job unprofitable or expensive to run, which keeper bots rightly skip.
 
 Not running a job never proves a keeper misbehaved, so since v5 missing a window never costs stake. The `slash_bps` setting is gone (the field stays in `Config`, always 0, so stored configs decode), and `set_keeper_windows` takes only the window length, capped at a day.
 
 Misses are still recorded in `keeper_stats` (`missed`, `recent_miss_bps`) so owners can judge keepers, but only when the keeper really had its whole window:
 
 - Jobs with a resolver or an `after` dependency never record misses, since either can block a run without leaving a trace.
-- The window counts from the latest of the run's due time and the last change that could have blocked it: the owner pausing, resuming, funding, withdrawing from or updating the job, the admin unpausing the registry or un-halting the target. Those timestamps live in temporary storage, which can't be archived, so recording a miss never needs a state restore.
+- The window counts from the latest of the run's due time and the last change that could have blocked it: the owner pausing, resuming, funding, withdrawing from or updating the job, the admin unpausing the registry or un-halting the target. Per-job timestamps live in temporary storage, which can't be archived, so recording a miss never needs a state restore.
+- It also counts from the last change in who a run is assigned to: a keeper joining the rotation, starting to unbond or becoming eligible by staking, or the admin changing windows or the minimum stake. Each reassigns some runs, and a keeper handed a run part way through its window didn't have the whole window. Only miss-counting restarts: a run whose due-time window has passed stays open to every keeper, so nobody can hold jobs back by changing the rotation. Someone could stake small amounts to keep restarting windows, which only stops misses from being recorded.
 
-`test_security.rs` plays each of those attacks and checks that the victim keeps its full stake and record.
+`test_security.rs` plays each of those attacks and checks that the victim keeps its full stake and record; `test_review.rs` does the same for owners swapping the allowlist and for rotation, eligibility and window changes, and checks that an update mid-window can't strand a job's balance.
 
 ## What keepers sign
 
@@ -75,6 +78,8 @@ A keeper signs the transaction its simulation produced, and simulation records e
 ## Batches and bad jobs
 
 A job whose target or resolver exhausts the compute budget, asks for the keeper's authorization, or needs a restore the keeper won't pay for makes the whole `execute_batch` simulation fail (budget errors can't be caught on-chain, by design). Keepers therefore split a failing batch until the job is alone, run the rest, and set the job aside for 30 ticks. Registry-wide errors (paused, keeper not staked) and network errors aren't split.
+
+Inside the registry, a batch runs its jobs in order, each seeing what the ones before it changed (a leader's new run, the keeper's updated stats), and a job that can't run is skipped before anything is written. A property test in `test_review.rs` checks that `execute_batch` leaves exactly the same job states, keeper stats and token balances as the same `execute` calls one after another, over generated jobs with fee ramps, run limits, resolvers, dependencies, allowlists, assigned windows, protocol fees and repeated ids.
 
 ## Failure charging
 
