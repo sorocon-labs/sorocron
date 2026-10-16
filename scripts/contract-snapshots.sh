@@ -50,7 +50,8 @@ case "${1:-}" in
     done
     echo "Wrote ${#wasms[@]} interfaces to contracts/interfaces and sizes to contracts/wasm-sizes.txt."
     # The SDK's typed event decoders follow the registry's interface (#134).
-    if command -v python3 >/dev/null 2>&1; then python3 scripts/gen-events.py; else python scripts/gen-events.py; fi
+    # `python3` can be a stub that only points at an installer (Windows), so fall back.
+    python3 scripts/gen-events.py 2>/dev/null || python scripts/gen-events.py
     ;;
 
   --check)

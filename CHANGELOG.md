@@ -44,6 +44,7 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - The dashboard's Attention filter now includes failing jobs, which were only listed under All.
 
 ### Changed
+- **Registry WASM 4.4 KB smaller** (58,585 to 54,197 bytes, 5.8 KB under the budget) with no change to its code or interface: doc comments on exported items keep their first sentence and what sentinel values mean, and the rest moved to `//` comments, which soroban-sdk doesn't copy into the contract spec. `scripts/spec-sizes.py` shows where a contract's bytes go, and `docs/costs.md` sets out the budget policy. ([#128](https://github.com/sorocon-labs/sorocron/issues/128))
 - The testnet registry was upgraded in place from v4 to v5 on 2026-10-16 (WASM `11f15741…2872`), keeping its address, jobs and keeper stake; rehearsed first against the deployed v4 WASM.
 - Debug builds compile dependencies without debug info and the workspace with line tables only: the registry's test build drops from 1.9 GB to 0.9 GB.
 

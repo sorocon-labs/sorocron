@@ -88,9 +88,10 @@ pub struct SoroCron;
 
 #[contractimpl]
 impl SoroCron {
-    /// Initializes the registry. Runs exactly once, at deploy time.
-    /// The executor is connected afterwards with `set_executor`, because it
-    /// needs the registry's address in its own constructor.
+    /// Initializes the registry.
+    // Runs exactly once, at deploy time. The executor is connected afterwards
+    // with `set_executor`, because it needs the registry's address in its own
+    // constructor.
     pub fn __constructor(
         env: Env,
         admin: Address,
@@ -129,7 +130,7 @@ impl SoroCron {
     // ------------------------------------------------------------------
 
     /// Registers a new job and escrows `deposit` of the fee token.
-    /// Returns the new job id.
+    // Returns the new job id.
     pub fn create_job(
         env: Env,
         owner: Address,
@@ -150,8 +151,8 @@ impl SoroCron {
     }
 
     /// Registers several jobs for one owner with a single token transfer.
-    /// `deposits[i]` funds `jobs[i]`. All-or-nothing: if any job is invalid,
-    /// none are created. Returns the new ids in input order.
+    // `deposits[i]` funds `jobs[i]`. All-or-nothing: if any job is invalid,
+    // none are created. Returns the new ids in input order.
     pub fn create_jobs(
         env: Env,
         owner: Address,
@@ -187,9 +188,10 @@ impl SoroCron {
     }
 
     /// Changes a job's call, schedule, fees, limits, resolver and keeper
-    /// allowlist. Owner only. The target can't change (cancel and recreate
-    /// instead). `next_run` is kept unless the calendar changes, so a new
-    /// interval takes effect after the next run.
+    /// allowlist.
+    // Owner only. The target can't change (cancel and recreate instead).
+    // `next_run` is kept unless the calendar changes, so a new interval takes
+    // effect after the next run.
     pub fn update_job(env: Env, job_id: u64, update: JobUpdate) -> Result<(), Error> {
         let config = storage::load_config(&env);
         ensure_not_paused(&config)?;
@@ -239,7 +241,8 @@ impl SoroCron {
         Ok(())
     }
 
-    /// Tops up a job's fee balance. Anyone may fund any job.
+    /// Tops up a job's fee balance.
+    // Anyone may fund any job.
     pub fn fund_job(env: Env, from: Address, job_id: u64, amount: i128) -> Result<i128, Error> {
         let config = storage::load_config(&env);
         ensure_not_paused(&config)?;
@@ -270,7 +273,7 @@ impl SoroCron {
     }
 
     /// Deletes a job and refunds its remaining balance to the owner.
-    /// Always allowed, even while the registry is paused.
+    // Always allowed, even while the registry is paused.
     pub fn cancel_job(env: Env, job_id: u64) -> Result<i128, Error> {
         let config = storage::load_config(&env);
         let (spec, state) = storage::get_job_parts(&env, job_id).ok_or(Error::JobNotFound)?;
@@ -295,8 +298,9 @@ impl SoroCron {
     }
 
     /// Withdraws part of a job's fee balance back to the owner, without
-    /// cancelling the job. Allowed while the registry is paused or the
-    /// target is halted (it is an exit, like `cancel_job`).
+    /// cancelling the job.
+    // Allowed while the registry is paused or the target is halted (it is an
+    // exit, like `cancel_job`).
     pub fn withdraw_job_balance(env: Env, job_id: u64, amount: i128) -> Result<i128, Error> {
         let config = storage::load_config(&env);
         let (spec, mut state) = storage::get_job_parts(&env, job_id).ok_or(Error::JobNotFound)?;
@@ -324,9 +328,10 @@ impl SoroCron {
         Ok(state.balance)
     }
 
-    /// Pauses (`active = false`) or resumes a job. A paused job keeps its
-    /// balance and schedule but can't be executed; funding and cancelling
-    /// still work. Resuming clears the failure count. Owner only.
+    /// Pauses (`active = false`) or resumes a job.
+    // A paused job keeps its balance and schedule but can't be executed;
+    // funding and cancelling still work. Resuming clears the failure count.
+    // Owner only.
     pub fn set_job_active(env: Env, job_id: u64, active: bool) -> Result<(), Error> {
         let config = storage::load_config(&env);
         let (spec, mut state) = storage::get_job_parts(&env, job_id).ok_or(Error::JobNotFound)?;
@@ -344,8 +349,9 @@ impl SoroCron {
     }
 
     /// Starts handing a job to `new_owner`, who takes over by calling
-    /// `accept_job_owner`. Proposing again replaces the pending owner, and
-    /// proposing the current owner withdraws the proposal. Owner only.
+    /// `accept_job_owner`.
+    // Proposing again replaces the pending owner, and proposing the current
+    // owner withdraws the proposal. Owner only.
     pub fn propose_job_owner(env: Env, job_id: u64, new_owner: Address) -> Result<(), Error> {
         let spec = storage::get_spec(&env, job_id).ok_or(Error::JobNotFound)?;
         spec.owner.require_auth();
@@ -364,8 +370,9 @@ impl SoroCron {
         Ok(())
     }
 
-    /// Completes a job handover. Must be signed by the proposed owner. The
-    /// job keeps its id, balance, schedule and run history.
+    /// Completes a job handover.
+    // Must be signed by the proposed owner. The job keeps its id, balance,
+    // schedule and run history.
     pub fn accept_job_owner(env: Env, job_id: u64) -> Result<(), Error> {
         let mut spec = storage::get_spec(&env, job_id).ok_or(Error::JobNotFound)?;
         let new_owner = storage::get_pending_owner(&env, job_id).ok_or(Error::NoPendingOwner)?;
@@ -388,7 +395,8 @@ impl SoroCron {
 
     /// Executes a due job: calls the target through the executor, advances
     /// the schedule and pays the run's fee to the calling keeper (minus the
-    /// protocol fee). A failed target call is still charged and recorded.
+    /// protocol fee).
+    // A failed target call is still charged and recorded.
     pub fn execute(env: Env, keeper: Address, job_id: u64) -> Result<(), Error> {
         let config = storage::load_config(&env);
         let (executor, info) = authorize_keeper(&env, &config, &keeper)?;
@@ -410,10 +418,10 @@ impl SoroCron {
     }
 
     /// Executes every job in `job_ids` that this keeper may run now, in
-    /// order, and pays all earnings in one transfer. Jobs that aren't due,
-    /// are reserved for another keeper, or are rejected by their resolver are
-    /// skipped instead of reverting the batch. Returns, per input id, whether
-    /// it ran (a run whose target failed still counts as run).
+    /// order, and pays all earnings in one transfer.
+    // Jobs that aren't due, are reserved for another keeper, or are rejected by
+    // their resolver are skipped instead of reverting the batch. Returns, per
+    // input id, whether it ran (a run whose target failed still counts as run).
     pub fn execute_batch(env: Env, keeper: Address, job_ids: Vec<u64>) -> Result<Vec<bool>, Error> {
         if job_ids.is_empty() || job_ids.len() > MAX_BATCH {
             return Err(Error::InvalidBatchSize);
@@ -446,8 +454,9 @@ impl SoroCron {
     // Keepers
     // ------------------------------------------------------------------
 
-    /// Stakes `amount` of the stake token. Registers the keeper on first call
-    /// and adds it to the assigned-window rotation while there is room.
+    /// Stakes `amount` of the stake token.
+    // Registers the keeper on first call and adds it to the assigned-window
+    // rotation while there is room.
     pub fn stake(env: Env, keeper: Address, amount: i128) -> Result<i128, Error> {
         let config = storage::load_config(&env);
         ensure_not_paused(&config)?;
@@ -486,11 +495,11 @@ impl SoroCron {
         Ok(info.stake)
     }
 
-    /// Starts the unbonding period. The keeper stops being eligible to
-    /// execute immediately and leaves the window rotation. With an unbonding
-    /// epoch configured, the period starts when the current epoch ends, so
-    /// every keeper unbonding in the same epoch can withdraw together.
-    /// Returns the timestamp when stake is withdrawable.
+    /// Starts the unbonding period.
+    // The keeper stops being eligible to execute immediately and leaves the
+    // window rotation. With an unbonding epoch configured, the period starts
+    // when the current epoch ends, so every keeper unbonding in the same epoch
+    // can withdraw together. Returns the timestamp when stake is withdrawable.
     pub fn begin_unbonding(env: Env, keeper: Address) -> Result<u64, Error> {
         let config = storage::load_config(&env);
         keeper.require_auth();
@@ -517,7 +526,7 @@ impl SoroCron {
     }
 
     /// Withdraws the full stake once unbonding has finished.
-    /// Always allowed, even while the registry is paused.
+    // Always allowed, even while the registry is paused.
     pub fn withdraw_stake(env: Env, keeper: Address) -> Result<i128, Error> {
         let config = storage::load_config(&env);
         keeper.require_auth();
@@ -525,9 +534,10 @@ impl SoroCron {
     }
 
     /// Pays out every listed keeper whose unbonding has finished, to that
-    /// keeper. Anyone may call it, so one transaction can settle a whole
-    /// unbonding epoch. Returns the amount released per keeper (`0` for
-    /// keepers that aren't ready or don't exist).
+    /// keeper.
+    // Anyone may call it, so one transaction can settle a whole unbonding
+    // epoch. Returns the amount released per keeper (`0` for keepers that
+    // aren't ready or don't exist).
     pub fn withdraw_stakes(env: Env, keepers: Vec<Address>) -> Result<Vec<i128>, Error> {
         if keepers.is_empty() || keepers.len() > MAX_BATCH {
             return Err(Error::InvalidBatchSize);
@@ -544,8 +554,9 @@ impl SoroCron {
     // Admin
     // ------------------------------------------------------------------
 
-    /// Connects the executor contract. Can only be done once, so users can
-    /// verify which executor their jobs will run through.
+    /// Connects the executor contract.
+    // Can only be done once, so users can verify which executor their jobs will
+    // run through.
     pub fn set_executor(env: Env, executor: Address) -> Result<(), Error> {
         let mut config = storage::load_config(&env);
         config.admin.require_auth();
@@ -558,8 +569,9 @@ impl SoroCron {
         Ok(())
     }
 
-    /// Starts an admin handover. The proposed admin must call `accept_admin`
-    /// to take over. Proposing again replaces the pending proposal.
+    /// Starts an admin handover.
+    // The proposed admin must call `accept_admin` to take over. Proposing again
+    // replaces the pending proposal.
     pub fn propose_admin(env: Env, new_admin: Address) {
         let config = storage::load_config(&env);
         config.admin.require_auth();
@@ -571,8 +583,9 @@ impl SoroCron {
         .publish(&env);
     }
 
-    /// Completes an admin handover. Must be signed by the proposed admin,
-    /// which proves the new key is controlled before the old one lets go.
+    /// Completes an admin handover.
+    // Must be signed by the proposed admin, which proves the new key is
+    // controlled before the old one lets go.
     pub fn accept_admin(env: Env) -> Result<(), Error> {
         let mut config = storage::load_config(&env);
         let pending = storage::get_pending_admin(&env).ok_or(Error::NoPendingAdmin)?;
@@ -595,7 +608,8 @@ impl SoroCron {
         storage::get_pending_admin(&env)
     }
 
-    /// Withdraws a pending admin proposal. Current admin only.
+    /// Withdraws a pending admin proposal.
+    // Current admin only.
     pub fn cancel_admin_proposal(env: Env) -> Result<(), Error> {
         let config = storage::load_config(&env);
         config.admin.require_auth();
@@ -611,8 +625,9 @@ impl SoroCron {
         Ok(())
     }
 
-    /// Emergency switch. While paused, no jobs run and no new funds enter;
-    /// cancellations and stake withdrawals keep working.
+    /// Emergency switch.
+    // While paused, no jobs run and no new funds enter; cancellations and stake
+    // withdrawals keep working.
     pub fn set_paused(env: Env, paused: bool) {
         let mut config = storage::load_config(&env);
         config.admin.require_auth();
@@ -625,8 +640,8 @@ impl SoroCron {
     }
 
     /// Circuit breaker for one contract: while halted, no job that calls
-    /// `target` can run, without pausing the rest of the registry. Owners
-    /// keep withdrawing and cancelling as usual. Works while paused.
+    /// `target` can run, without pausing the rest of the registry.
+    // Owners keep withdrawing and cancelling as usual. Works while paused.
     pub fn set_target_halted(env: Env, target: Address, halted: bool) {
         let config = storage::load_config(&env);
         config.admin.require_auth();
@@ -701,11 +716,12 @@ impl SoroCron {
 
     /// Turns on assigned keeper windows: for `grace_period` seconds (at most
     /// `MAX_GRACE_PERIOD`) after a run is due only its assigned keeper may
-    /// execute it; after that anyone may. A keeper that had its whole window
-    /// and let it pass gets the miss recorded in `keeper_stats`. Missing a
-    /// window never costs stake: whether a run was possible depends on things
-    /// the job's owner controls, so a miss proves nothing about the keeper.
-    /// `grace_period = 0` returns to first come, first served.
+    /// execute it; after that anyone may.
+    // A keeper that had its whole window and let it pass gets the miss recorded
+    // in `keeper_stats`. Missing a window never costs stake: whether a run was
+    // possible depends on things the job's owner controls, so a miss proves
+    // nothing about the keeper. `grace_period = 0` returns to first come, first
+    // served.
     pub fn set_keeper_windows(env: Env, grace_period: u64) -> Result<(), Error> {
         let mut config = storage::load_config(&env);
         config.admin.require_auth();
@@ -734,11 +750,12 @@ impl SoroCron {
         Ok(())
     }
 
-    /// Announces new registry code. `apply_upgrade` installs it once
-    /// `upgrade_delay()` seconds have passed, which gives job owners time to
-    /// review it and leave, and keepers time to unbond and withdraw.
-    /// Proposing again replaces the pending upgrade and restarts the delay.
-    /// Admin only. Returns when the upgrade becomes available.
+    /// Announces new registry code.
+    // `apply_upgrade` installs it once `upgrade_delay()` seconds have passed,
+    // which gives job owners time to review it and leave, and keepers time to
+    // unbond and withdraw. Proposing again replaces the pending upgrade and
+    // restarts the delay. Admin only. Returns when the upgrade becomes
+    // available.
     pub fn propose_upgrade(env: Env, wasm_hash: BytesN<32>) -> u64 {
         let config = storage::load_config(&env);
         config.admin.require_auth();
@@ -761,7 +778,8 @@ impl SoroCron {
     }
 
     /// Installs the pending upgrade once its delay has passed, keeping the
-    /// registry's storage and address. Admin only.
+    /// registry's storage and address.
+    // Admin only.
     pub fn apply_upgrade(env: Env) -> Result<(), Error> {
         let config = storage::load_config(&env);
         config.admin.require_auth();
@@ -781,7 +799,8 @@ impl SoroCron {
         Ok(())
     }
 
-    /// Withdraws the pending upgrade. Admin only.
+    /// Withdraws the pending upgrade.
+    // Admin only.
     pub fn cancel_upgrade(env: Env) -> Result<(), Error> {
         let config = storage::load_config(&env);
         config.admin.require_auth();
@@ -794,10 +813,10 @@ impl SoroCron {
         Ok(())
     }
 
-    /// Sets how many seconds a proposed upgrade waits. It can't be shorter
-    /// than a keeper needs to unbond and withdraw (`unbonding_period +
-    /// unbonding_epoch`), so everyone can leave before new code runs.
-    /// Admin only.
+    /// Sets how many seconds a proposed upgrade waits.
+    // It can't be shorter than a keeper needs to unbond and withdraw
+    // (`unbonding_period + unbonding_epoch`), so everyone can leave before new
+    // code runs. Admin only.
     pub fn set_upgrade_delay(env: Env, upgrade_delay: u64) -> Result<(), Error> {
         let config = storage::load_config(&env);
         config.admin.require_auth();
@@ -814,8 +833,9 @@ impl SoroCron {
     // Views
     // ------------------------------------------------------------------
 
-    /// Interface version of this code. Bumped whenever functions, types or
-    /// events change, so clients can tell which registry they're talking to.
+    /// Interface version of this code.
+    // Bumped whenever functions, types or events change, so clients can tell
+    // which registry they're talking to.
     pub fn version() -> u32 {
         VERSION
     }
@@ -895,7 +915,7 @@ impl SoroCron {
     }
 
     /// Jobs with ids in `[start, start + limit)`, skipping cancelled ids.
-    /// `limit` is capped at `MAX_GET_JOBS_LIMIT`.
+    // `limit` is capped at `MAX_GET_JOBS_LIMIT`.
     pub fn get_jobs(env: Env, start: u64, limit: u32) -> Vec<Job> {
         let limit = limit.min(MAX_GET_JOBS_LIMIT);
         let end = start
@@ -914,13 +934,14 @@ impl SoroCron {
     }
 
     /// Ids of jobs currently owned by `owner`, in the order they were created
-    /// or handed to `owner`. Cancelled jobs are removed from this list.
+    /// or handed to `owner`.
+    // Cancelled jobs are removed from this list.
     pub fn jobs_by_owner(env: Env, owner: Address) -> Vec<u64> {
         storage::owner_jobs(&env, &owner)
     }
 
-    /// Number of job ids ever issued. Ids run from `0` to `job_count - 1`;
-    /// cancelled ids are not reused.
+    /// Number of job ids ever issued.
+    // Ids run from `0` to `job_count - 1`; cancelled ids are not reused.
     pub fn job_count(env: Env) -> u64 {
         storage::next_job_id(&env)
     }
