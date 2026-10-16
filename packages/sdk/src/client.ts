@@ -15,6 +15,7 @@ import { RestoreRequiredError, SoroCronError, parseContractError } from "./error
 import type { NetworkConfig } from "./networks.js";
 import { fetchEvents, toExecution, type EventPage, type Execution, type FetchEventsOptions } from "./events.js";
 import type { Config, Job, JobParams, JobState, JobUpdate, Keeper, KeeperStats, PendingUpgrade } from "./types.js";
+import { suggestFee, type FeeSuggestion, type JobCall, type SuggestFeeOptions } from "./fees.js";
 
 export interface ConnectOptions {
   network: NetworkConfig;
@@ -205,6 +206,15 @@ export class SoroCron {
   /** Soroban RPC client for this network. */
   get server(): rpc.Server {
     return new rpc.Server(this.network.rpcUrl, { allowHttp: this.network.rpcUrl.startsWith("http://") });
+  }
+
+  /**
+   * A `fee_per_run` that covers what a keeper pays to run this call, with a
+   * margin; see `suggestFee`. Throws `FeeEstimateError` when the call can't
+   * be simulated.
+   */
+  suggestFee(call: JobCall, options?: SuggestFeeOptions): Promise<FeeSuggestion> {
+    return suggestFee(this.server, this.network.networkPassphrase, call, options);
   }
 
   /** Raw registry events; see `fetchEvents`. */

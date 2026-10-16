@@ -48,6 +48,19 @@ const { hash, result: jobId } = await cron.createJob(
 );
 ```
 
+Not sure what to pay per run? `suggestFee` simulates the call on its own, adds the registry's overhead and a recent inclusion fee, and puts a 50% margin on top. Keepers skip jobs that pay less than `breakEvenStroops`:
+
+```ts
+const { breakEvenStroops, suggestedStroops } = await cron.suggestFee({
+  target: TESTNET.contracts.counter!,
+  function: "increment",
+  args: [arg.u32(1)],
+});
+// On testnet in October 2026: about 0.002 XLM to break even, 0.004 XLM suggested.
+```
+
+It throws `FeeEstimateError` when the call can't be simulated, for example because it fails outside the registry. Pass `{ marginBps, overheadStroops }` to change the margin or the overhead.
+
 Keep a contract from being archived with the TTL Guardian:
 
 ```ts

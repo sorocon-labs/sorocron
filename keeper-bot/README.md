@@ -177,7 +177,9 @@ npm run cli -- jobs list --status due
 # Everything about one job, including whether a keeper could run it now
 npm run cli -- jobs show 7
 
-# Call counter.increment(1) every hour, prepaying 24 runs at 0.1 XLM
+# Call counter.increment(1) every hour, prepaying 24 runs at 0.1 XLM.
+# `create` first prints what a run costs a keeper and a suggested fee, and
+# warns when --fee is below that cost.
 npm run cli -- jobs create --target CDAJ...WU2 --function increment --arg u32:1 \
   --every 1h --fee 0.1 --runs 24
 

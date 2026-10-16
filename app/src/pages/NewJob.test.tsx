@@ -113,6 +113,49 @@ describe("New job form", () => {
     expect(await screen.findByText("Open job #42")).toBeTruthy();
   });
 
+  it("suggests a fee from the call's cost and warns below what a keeper pays (#138)", async () => {
+    const suggestFee = vi.fn(async () => ({
+      targetStroops: 7_609n,
+      overheadStroops: 12_500n,
+      inclusionStroops: 100n,
+      breakEvenStroops: 2_000_000n,
+      suggestedStroops: 3_000_000n,
+    }));
+    state.registry = { cron: { createJob, suggestFee }, config: undefined, refresh: vi.fn() };
+    render(<NewJob />);
+    type("Contract", TARGET);
+    type("Function", "increment");
+    next();
+    expect(suggestFee).not.toHaveBeenCalled();
+    next();
+    onStep(3);
+    type("Fee per run", "0.1");
+
+    expect(await screen.findByText(/A run costs a keeper about 0.2 XLM right now/)).toBeTruthy();
+    expect(suggestFee).toHaveBeenCalledWith({ target: TARGET, function: "increment", args: [] });
+    expect(screen.getByRole("status").textContent).toMatch(/0.1 XLM is below the 0.2 XLM a run costs a keeper/);
+
+    fireEvent.click(screen.getByRole("button", { name: "0.3 XLM" }));
+    expect((screen.getByLabelText("Fee per run") as HTMLInputElement).value).toBe("0.3");
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(suggestFee).toHaveBeenCalledTimes(1);
+  });
+
+  it("still works when the call can't be simulated", async () => {
+    const suggestFee = vi.fn(async () => {
+      throw new Error("Couldn't estimate what the call costs: HostError");
+    });
+    state.registry = { cron: { createJob, suggestFee }, config: undefined, refresh: vi.fn() };
+    render(<NewJob />);
+    type("Contract", TARGET);
+    type("Function", "increment");
+    next();
+    next();
+    expect(await screen.findByText(/This call couldn't be simulated/)).toBeTruthy();
+    type("Fee per run", "0.0001");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("asks for a wallet instead of scheduling without one", () => {
     state.wallet = { account: undefined, promptConnect: vi.fn() };
     render(<NewJob />);

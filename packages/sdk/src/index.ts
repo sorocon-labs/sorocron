@@ -32,6 +32,16 @@ export {
   type Execution,
   type LeaderboardRow,
 } from "./events.js";
+export {
+  suggestFee,
+  FeeEstimateError,
+  REGISTRY_OVERHEAD_STROOPS,
+  DEFAULT_FEE_MARGIN_BPS,
+  type FeeSuggestion,
+  type SuggestFeeOptions,
+  type JobCall,
+  type FeeRpc,
+} from "./fees.js";
 export { TESTNET, type NetworkConfig } from "./networks.js";
 export type {
   Config,

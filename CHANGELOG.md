@@ -31,6 +31,8 @@ All notable changes to SoroCron are documented here. The format follows [Keep a 
 - **`sorocron jobs watch <id>`** prints each run (fee, lateness, transaction), top-up, pause, update, handover and cancellation of a job as it lands; `--from-ledger` replays and `--json` prints one object per line. ([#133](https://github.com/sorocon-labs/sorocron/issues/133))
 - **Owner alerts**: `sorocron jobs monitor` posts to a Discord, Slack or generic webhook once when a job's balance drops below `--min-runs` runs, once when it pauses itself after failures, and once before its end time, with a Docker Compose profile and a systemd unit for running it continuously. ([#136](https://github.com/sorocon-labs/sorocron/issues/136))
 
+- **Fee suggestions**: `suggestFee` (and `cron.suggestFee`) in the SDK simulates a job's call, adds the registry's measured overhead and the recent p90 inclusion fee, and suggests a fee with a 50% margin. The New Job form shows it with a one-click "use this" and warns when the chosen fee is below what a keeper pays; `sorocron jobs create` prints it and warns too. ([#138](https://github.com/sorocon-labs/sorocron/issues/138))
+
 ### Fixed
 - The keeper splits a batch that costs more than it earns instead of skipping all of it, so one expensive job no longer holds back cheap ones.
 - The dashboard's Attention filter now includes failing jobs, which were only listed under All.

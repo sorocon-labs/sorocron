@@ -74,7 +74,19 @@ Reading the table:
   once a month per contract, not per run.
 - **Job fees should cover the keeper's cost.** A `fee_per_run` below the
   keeper's network fee makes the job unprofitable to run; the reference
-  keeper skips such jobs (`MIN_PROFIT_STROOPS`).
+  keeper skips such jobs (`MIN_PROFIT_STROOPS`). `suggestFee` in the SDK
+  (also shown by the New Job form and `sorocron jobs create`) estimates it
+  from live network costs: the call simulated on its own, plus
+  `REGISTRY_OVERHEAD_STROOPS` and a recent inclusion fee. The overhead was
+  measured on testnet in October 2026, where `counter.increment(1)` cost
+  19,829 stroops through `execute_batch` and 7,609 on its own; real fees are
+  about a hundred times lower than the benchmark's upper bound.
+- **TTL extensions land on whoever runs next.** The registry extends its
+  own instance and code to 7 days whenever fewer than 6 remain, so roughly
+  one call a day pays that rent. The first run after the v4 to v5 upgrade on
+  testnet cost 1.3 XLM (extending the newly uploaded code and creating v5's
+  new entries), against 0.002 XLM for the runs after it. A keeper that insists on profit for every single batch can skip that
+  run; the suggested fee's margin covers some of it.
 - **Batching amortises the fixed cost.** Five jobs in one `execute_batch`
   cost about the same fee as one `execute`, so keepers batch whenever
   several jobs are due. `MAX_BATCH` is 20 jobs, which keeps a full batch of
