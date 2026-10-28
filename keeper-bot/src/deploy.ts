@@ -81,14 +81,23 @@ async function submit(keypair: Keypair, op: xdr.Operation, what: string): Promis
  * local network doesn't, so deploy it before the registry needs it.
  */
 async function ensureNativeToken(keypair: Keypair, feeToken: string): Promise<void> {
-  try {
-    await server.getContractData(feeToken, xdr.ScVal.scvLedgerKeyContractInstance(), rpc.Durability.Persistent);
-    return;
-  } catch {
-    // Not deployed on this network yet.
-  }
+  const hasNativeToken = async (): Promise<boolean> => {
+    try {
+      await server.getContractData(feeToken, xdr.ScVal.scvLedgerKeyContractInstance(), rpc.Durability.Persistent);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  if (await hasNativeToken()) return;
+
   console.log("Deploying the native XLM token contract...");
-  await submit(keypair, Operation.createStellarAssetContract({ asset: Asset.native() }), "Deploying the XLM token");
+  try {
+    await submit(keypair, Operation.createStellarAssetContract({ asset: Asset.native() }), "Deploying the XLM token");
+  } catch (error) {
+    if (!(await hasNativeToken())) throw error;
+  }
 }
 
 async function deploy(keypair: Keypair, wasmHash: string, args: Record<string, unknown> | null): Promise<string> {
