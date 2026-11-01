@@ -198,7 +198,7 @@ jobs:
         # Stakes, creates two jobs and runs both; fails unless both ran.
         run: npm run demo -w sorocron-keeper-bot
       - name: Open a pull request with the new addresses
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           base: main
           branch: deploy/testnet-${{ github.run_id }}
