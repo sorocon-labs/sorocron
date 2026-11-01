@@ -49,7 +49,7 @@ jobs:
              target/wasm32v1-none/release/sorocron_executor.wasm \
              target/wasm32v1-none/release/sorocron_ttl_guardian.wasm release/
           cd release && sha256sum *.wasm > SHA256SUMS
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: release/*
           generate_release_notes: true
