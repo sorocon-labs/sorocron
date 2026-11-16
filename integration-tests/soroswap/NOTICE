@@ -1,0 +1,9 @@
+SoroCron Soroswap integration tests
+Copyright 2026 Roman Karpovich and SoroCron contributors
+
+The test code is contributed under the MIT License, matching this repository.
+Adapted from roman-karpovich/kanatoko-sorocron-repro.
+
+fixtures/*.json contain state read from public Stellar mainnet, including
+Soroswap router/pair and Stellar Asset Contract code. Captured third-party
+code remains under its authors' terms and is included for offline replay.
