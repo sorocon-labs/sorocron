@@ -23,6 +23,16 @@ jobs:
       # Built before the tests: the upgrade test installs the real registry WASM.
       - run: stellar contract build
       - run: cargo test
+      - name: Replay Soroswap integration regressions
+        run: |
+          mkdir -p integration-tests/soroswap/wasm
+          cp target/wasm32v1-none/release/sorocron_example_dca.wasm integration-tests/soroswap/wasm/
+          cp target/wasm32v1-none/release/sorocron_example_limit_order.wasm integration-tests/soroswap/wasm/
+          manifest=integration-tests/soroswap/Cargo.toml
+          cargo fmt --manifest-path "$manifest" --all -- --check
+          cargo fetch --locked --manifest-path "$manifest"
+          cargo clippy --locked --offline --manifest-path "$manifest" --all-targets -- -D warnings
+          cargo test --locked --offline --manifest-path "$manifest"
       - name: Fee accounting invariant (issue #5)
         # Random sequences of every registry operation; checks that escrow
         # equals job balances plus stakes after each step.

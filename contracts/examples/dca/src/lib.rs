@@ -172,7 +172,7 @@ impl DcaVault {
             &min_out,
             &vec![&env, plan.sell_token.clone(), plan.buy_token.clone()],
             &vault,
-            &env.ledger().timestamp(),
+            &(env.ledger().timestamp() + 1),
         );
         let received = amounts.last().unwrap_or(0);
         token::Client::new(&env, &plan.buy_token).transfer(&vault, &plan.owner, &received);

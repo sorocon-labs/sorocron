@@ -157,7 +157,7 @@ impl LimitOrder {
             &order.min_amount_out,
             &path(&env, &order),
             &me,
-            &env.ledger().timestamp(),
+            &(env.ledger().timestamp() + 1),
         );
         let out = amounts.last().unwrap_or(0);
         token::Client::new(&env, &order.buy_token).transfer(&me, &order.owner, &out);

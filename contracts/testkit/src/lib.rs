@@ -243,7 +243,7 @@ impl MockRouter {
         deadline: u64,
     ) -> Vec<i128> {
         to.require_auth();
-        if env.ledger().timestamp() > deadline {
+        if env.ledger().timestamp() >= deadline {
             panic!("expired");
         }
         let out = Self::router_get_amounts_out(env.clone(), amount_in, path.clone())
