@@ -10,4 +10,4 @@ description = "SoroCron examples against captured Soroswap contracts"
 [workspace]
 
 [dev-dependencies]
-kanatoko = { version = "=29.1.0", features = ["capture"] }
+kanatoko = { version = "=30.0.0", features = ["capture"] }

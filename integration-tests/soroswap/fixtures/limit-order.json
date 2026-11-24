@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
   "ledger_snapshot": {
-    "protocol_version": 29,
-    "sequence_number": 65507615,
-    "timestamp": 1794824117,
+    "protocol_version": 30,
+    "sequence_number": 65646115,
+    "timestamp": 1795516627,
     "network_id": "7ac33997544e3175d266bd022439b22cdb16508c01163f26e5cb2a3e1045a979",
     "base_reserve": 5000000,
     "min_persistent_entry_ttl": 2073600,
@@ -12,11 +12,11 @@
     "ledger_entries": [
       {
         "entry": {
-          "last_modified_ledger_seq": 65287496,
+          "last_modified_ledger_seq": 65578556,
           "data": {
             "account": {
               "account_id": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
-              "balance": "321099354850",
+              "balance": "321182208225",
               "seq_num": "144373126631784461",
               "num_sub_entries": 6,
               "inflation_dest": null,
@@ -112,7 +112,7 @@
       },
       {
         "entry": {
-          "last_modified_ledger_seq": 65507497,
+          "last_modified_ledger_seq": 65646038,
           "data": {
             "contract_data": {
               "ext": "v0",
@@ -146,7 +146,7 @@
                         "u32": 2
                       },
                       "val": {
-                        "i128": "3817930850421"
+                        "i128": "90349946160"
                       }
                     },
                     {
@@ -154,7 +154,7 @@
                         "u32": 3
                       },
                       "val": {
-                        "i128": "524097169226"
+                        "i128": "11579112310"
                       }
                     },
                     {
@@ -207,7 +207,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "1216339746083"
+                        "i128": "27779685437"
                       }
                     }
                   ]
@@ -217,11 +217,11 @@
           },
           "ext": "v0"
         },
-        "live_until": 66013229
+        "live_until": 66154558
       },
       {
         "entry": {
-          "last_modified_ledger_seq": 65507497,
+          "last_modified_ledger_seq": 65646038,
           "data": {
             "contract_data": {
               "ext": "v0",
@@ -244,7 +244,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "3817930850421"
+                      "i128": "90349946160"
                     }
                   },
                   {
@@ -269,7 +269,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 66013229
+        "live_until": 66154558
       },
       {
         "entry": {
@@ -340,7 +340,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 68033878
+        "live_until": 68745049
       },
       {
         "entry": {
@@ -475,7 +475,7 @@
       },
       {
         "entry": {
-          "last_modified_ledger_seq": 65507497,
+          "last_modified_ledger_seq": 65646038,
           "data": {
             "contract_data": {
               "ext": "v0",
@@ -498,7 +498,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "524097169226"
+                      "i128": "11579112310"
                     }
                   },
                   {
@@ -523,7 +523,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 66013229
+        "live_until": 66154558
       },
       {
         "entry": {
@@ -626,7 +626,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 68033878
+        "live_until": 68213789
       },
       {
         "entry": {
@@ -725,11 +725,11 @@
   },
   "known_absent": [
     "AAAAAAAAAADLl9m3XfmyMQLYRBatvWnRMR4SNqRcqXui4IPAygBpiA==",
-    "AAAABgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAABQAAAAB",
-    "AAAABgAAAAEltPzYWa7C+mNIQ4xImzw8EMmLbSG+T9PLMMtolT75dwAAABAAAAABAAAAAgAAAA8AAAAHQmFsYW5jZQAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQ==",
+    "AAAABgAAAAEltPzYWa7C+mNIQ4xImzw8EMmLbSG+T9PLMMtolT75dwAAABAAAAABAAAAAgAAAA8AAAAHQmFsYW5jZQAAAAASAAAAAZWCoAoYTyjg/rb7E8QLnleusjXWx3dMKhA2+WSuCnnWAAAAAQ==",
+    "AAAABgAAAAGVgqAKGE8o4P62+xPEC55XrrI11sd3TCoQNvlkrgp51gAAABQAAAAB",
     "AAAABgAAAAGetNfgUoqCcXctaWzcaNHasgv02KBwMqNeDwKZhqzFHgAAABUOWEdQFwSDCAAAAAA=",
     "AAAABgAAAAGetNfgUoqCcXctaWzcaNHasgv02KBwMqNeDwKZhqzFHgAAABVM5l8NaFYv7wAAAAA=",
-    "AAAABgAAAAGt785ZruUpaPdgYdSUwlJbdWWfpClqZfSZ7ynlZHfklgAAABAAAAABAAAAAgAAAA8AAAAHQmFsYW5jZQAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQ=="
+    "AAAABgAAAAGt785ZruUpaPdgYdSUwlJbdWWfpClqZfSZ7ynlZHfklgAAABAAAAABAAAAAgAAAA8AAAAHQmFsYW5jZQAAAAASAAAAAZWCoAoYTyjg/rb7E8QLnleusjXWx3dMKhA2+WSuCnnWAAAAAQ=="
   ],
   "report": {
     "discovery_rounds": 2,
@@ -740,11 +740,11 @@
   "provenance": {
     "rpc_origin": "https://mainnet.sorobanrpc.com",
     "network_passphrase": "Public Global Stellar Network ; September 2015",
-    "ledger_sequence": 65507615,
-    "ledger_hash": "648a43fec460f1e67db5afb2e31b89a039df95fef060e92b0178395a8bce2ce6",
-    "protocol_version": 29
+    "ledger_sequence": 65646115,
+    "ledger_hash": "1c6009a42aee4b338979faf11768693434b0ecd50c8bea3f434554806f6cbd10",
+    "protocol_version": 30
   },
-  "ledger_digest": "f99bfa54aa0d05ff48b6e5dc2cf070820988085938365732ff119431f0401796",
-  "inventory_digest": "56ce937938e903fe2e716df577be7d0065bbe72b6e2ad4a89f43d7a667638375",
-  "canonical_digest": "e760a3c65ac553aa944e456ceb0cfe767bbe6f8ff6d5beadf5c161c3f044ae14"
+  "ledger_digest": "aa560b72dd376f3f161eea1b3f40786f1eb6cb3eff7b3ec28e00670a2b43b939",
+  "inventory_digest": "5150926db932a348b427e42d248df34e68c30226fe3fc37f7d59579a4c1b2db9",
+  "canonical_digest": "96ecb14c9202925d258e4880eb9a7a4d23ccab7309f5014fe411f2baaba82d6b"
 }
