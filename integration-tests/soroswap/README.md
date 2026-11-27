@@ -26,7 +26,7 @@ check, hiding this mismatch. The mock now matches the router's `>=` boundary.
 
 ## Captured state and limitations
 
-`fixtures/*.json` are coherent Protocol 29 mainnet captures. Each file records
+`fixtures/*.json` are coherent Protocol 30 mainnet captures. Each file records
 its own ledger, provenance, known-absent keys and digest. The external router
 and pools execute their captured WASM; the examples are rebuilt from current
 source before the test. Do not replace this build with an old example binary.
@@ -41,10 +41,9 @@ integration-tests/soroswap/Cargo.toml` needs no network. This test package is
 its own Cargo workspace so its capture dependencies do not affect contract
 builds or the keeper.
 
-To deliberately replace the captures using read-only RPC on a Protocol 29
-network, set `KANATOKO_CAPTURE_RPC` to its URL and run the tests with
-`-- --test-threads=1`. This is not used in CI. If mainnet has upgraded, retain
-the old captures or first update the harness to a matching Kanatoko major.
+To deliberately replace the captures, set `KANATOKO_CAPTURE_RPC` to a
+Protocol 30 mainnet RPC URL and run the tests with `-- --test-threads=1`.
+The refresh uses read-only RPC and CI uses the committed captures.
 
 The initial reproduction is linked from
 [issue #172](https://github.com/sorocon-labs/sorocron/issues/172).
